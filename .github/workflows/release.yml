@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          node --version
+          npm --version
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag v$TAG does not match package.json version $PKG" >&2
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Tests
+        run: bun run test
+
+      # No NODE_AUTH_TOKEN. npm exchanges the GitHub OIDC token for a
+      # short-lived publish credential using the package's trusted publisher.
+      # The version check makes the bootstrap/tag flow idempotent.
+      - name: Publish to npm with trusted publishing
+        run: |
+          set -euo pipefail
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if ! npm view opencode-agent-workflows version >/dev/null 2>&1; then
+            echo "opencode-agent-workflows is not on npm yet. Complete the first-publish bootstrap in docs/releasing.md." >&2
+            exit 1
+          fi
+          if npm view "opencode-agent-workflows@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "opencode-agent-workflows@${PKG_VERSION} is already published; skipping publish."
+          else
+            npm publish --provenance --access public
+          fi
+
+      - name: Create GitHub release
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

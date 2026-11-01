@@ -1,0 +1,21 @@
+version: 1
+name: review
+description: Two-stage review loop
+
+entry: developer
+
+limits:
+  max_steps: 6
+  timeout_seconds: 1800
+
+nodes:
+  developer:
+    agent: developer
+    next: reviewer
+
+  reviewer:
+    agent: reviewer
+    routes:
+      approved: complete
+      changes_requested: developer
+      blocked: pause
