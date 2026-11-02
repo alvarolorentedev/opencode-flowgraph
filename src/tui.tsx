@@ -5,6 +5,7 @@ import type { PanelInput } from "@opencode/plugin/tui/context"
 import { AgentWorkflowsRpc } from "./rpc.js"
 import type { RunGraphOutput, RunGraphNode, WorkflowSummaryView } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
+import { errorDetail } from "./util/redact.js"
 
 const PANEL = "agent-workflows.graph"
 
@@ -44,7 +45,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
       setGraph(result)
       setError(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load the workflow graph")
+      setError(errorDetail(cause, "Unable to load the workflow graph"))
     }
   }
 
@@ -85,7 +86,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
       timer = setInterval(() => void load(runID), 3_000)
     } catch (cause) {
       if (current !== generation) return
-      setError(cause instanceof Error ? cause.message : "Unable to load the workflow graph")
+      setError(errorDetail(cause, "Unable to load the workflow graph"))
     }
   }
 
@@ -120,7 +121,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
         { location: location() },
       )
     } catch (cause) {
-      context.ui.toast.show({ message: cause instanceof Error ? cause.message : "Pause failed", variant: "error" })
+      context.ui.toast.show({ message: errorDetail(cause, "Pause failed"), variant: "error" })
     }
   }
 
@@ -142,7 +143,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
         { location: location() },
       )
     } catch (cause) {
-      context.ui.toast.show({ message: cause instanceof Error ? cause.message : "Resume failed", variant: "error" })
+      context.ui.toast.show({ message: errorDetail(cause, "Resume failed"), variant: "error" })
     }
   }
 
@@ -161,7 +162,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
         { location: location() },
       )
     } catch (cause) {
-      context.ui.toast.show({ message: cause instanceof Error ? cause.message : "Cancel failed", variant: "error" })
+      context.ui.toast.show({ message: errorDetail(cause, "Cancel failed"), variant: "error" })
     }
   }
 
@@ -288,7 +289,7 @@ export default Plugin.define({
           })),
         })
       } catch (cause) {
-        toast(cause instanceof Error ? cause.message : "Unable to list workflows", "error")
+        toast(errorDetail(cause, "Unable to list workflows"), "error")
         return undefined
       }
     }
@@ -302,7 +303,7 @@ export default Plugin.define({
         toast(`Started ${workflowID} (${run.runID})`, "success")
         open()
       } catch (cause) {
-        toast(cause instanceof Error ? cause.message : "Unable to start workflow", "error")
+        toast(errorDetail(cause, "Unable to start workflow"), "error")
       }
     }
 

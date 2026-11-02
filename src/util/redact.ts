@@ -16,7 +16,28 @@ export function redactText(value: string): string {
 export function errorMessage(error: unknown, fallback = "unknown error"): string {
   if (error instanceof Error) return redactText(error.message || fallback)
   if (typeof error === "string") return redactText(error)
+  if (error !== null && typeof error === "object") {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.length > 0) return redactText(message)
+  }
   return fallback
+}
+
+export function errorDetail(error: unknown, fallback = "unknown error"): string {
+  const message = errorMessage(error, fallback)
+  if (error === null || typeof error !== "object") return message
+
+  const data = (error as { data?: unknown }).data
+  if (data === null || typeof data !== "object") return message
+
+  const diagnostics = (data as { diagnostics?: unknown }).diagnostics
+  if (!Array.isArray(diagnostics) || diagnostics.length === 0) return message
+
+  const first = diagnostics[0]
+  if (first === null || typeof first !== "object") return message
+
+  const detail = (first as { message?: unknown }).message
+  return typeof detail === "string" && detail.length > 0 ? redactText(`${message}: ${detail}`) : message
 }
 
 export function errorType(error: unknown): string | undefined {

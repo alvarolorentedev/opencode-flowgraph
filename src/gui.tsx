@@ -4,6 +4,7 @@ import mermaid from "mermaid"
 import { AgentWorkflowsRpc } from "./rpc.js"
 import type { RunGraphOutput } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
+import { errorDetail } from "./util/redact.js"
 
 const TAB_ID = "graph"
 
@@ -49,7 +50,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
       setGraph(result)
       setError(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load the workflow graph")
+      setError(errorDetail(cause, "Unable to load the workflow graph"))
     }
   }
 
@@ -95,7 +96,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
         }
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to render Mermaid")
+      setError(errorDetail(cause, "Unable to render Mermaid"))
     }
   }
 
@@ -129,7 +130,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
       timer = setInterval(() => void load(runID), 3_000)
     } catch (cause) {
       if (current !== generation) return
-      setError(cause instanceof Error ? cause.message : "Unable to load the workflow graph")
+      setError(errorDetail(cause, "Unable to load the workflow graph"))
     }
   }
 
@@ -160,7 +161,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
         { location: location() },
       )
     } catch (cause) {
-      ctx.toast.show({ title: "Workflow", description: cause instanceof Error ? cause.message : "Pause failed", variant: "error" })
+      ctx.toast.show({ title: "Workflow", description: errorDetail(cause, "Pause failed"), variant: "error" })
     }
   }
 
@@ -183,7 +184,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
         { location: location() },
       )
     } catch (cause) {
-      ctx.toast.show({ title: "Workflow", description: cause instanceof Error ? cause.message : "Resume failed", variant: "error" })
+      ctx.toast.show({ title: "Workflow", description: errorDetail(cause, "Resume failed"), variant: "error" })
     }
   }
 
@@ -204,7 +205,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
         { location: location() },
       )
     } catch (cause) {
-      ctx.toast.show({ title: "Workflow", description: cause instanceof Error ? cause.message : "Cancel failed", variant: "error" })
+      ctx.toast.show({ title: "Workflow", description: errorDetail(cause, "Cancel failed"), variant: "error" })
     }
   }
 
@@ -296,7 +297,7 @@ export default Plugin.define({
       } catch (cause) {
         ctx.toast.show({
           title: "Workflow",
-          description: cause instanceof Error ? cause.message : "Unable to list workflows",
+          description: errorDetail(cause, "Unable to list workflows"),
           variant: "error",
         })
         return undefined
@@ -323,7 +324,7 @@ export default Plugin.define({
       } catch (cause) {
         ctx.toast.show({
           title: "Workflow",
-          description: cause instanceof Error ? cause.message : "Unable to start workflow",
+          description: errorDetail(cause, "Unable to start workflow"),
           variant: "error",
         })
       }

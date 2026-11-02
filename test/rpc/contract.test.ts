@@ -49,7 +49,7 @@ describe("agent_workflows RPC contract", () => {
   it("validates the capabilities and runUpdated payloads", () => {
     expect(
       CapabilitiesOutputSchema.safeParse({
-        plugin: { name: "opencode-agent-workflows", version: "0.1.4" },
+        plugin: { name: "opencode-agent-workflows", version: "0.1.5" },
         rpc: { id: "agent_workflows", version: 1 },
         workflowSchemaVersion: 1,
         openCodeVersion: "2.0.32",
