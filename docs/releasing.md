@@ -21,7 +21,7 @@ npm login
 npm publish --access public
 ```
 
-`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.2.0` and creates the package on npm.
+`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.2.1` and creates the package on npm.
 
 Then configure the trusted publisher:
 
@@ -71,14 +71,14 @@ After configuring the trusted publisher, publish the next patch through GitHub A
 ```sh
 npm version patch --no-git-tag-version
 git add package.json bun.lock
-git commit -m "release: v0.2.1"
+git commit -m "release: v0.2.2"
 git push
 
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
-The workflow publishes `0.2.1` through OIDC and completes the trusted-publisher validation. The bootstrap `0.2.0` has no OIDC provenance; that is expected.
+The workflow publishes `0.2.2` through OIDC and completes the trusted-publisher validation. The bootstrap `0.2.1` has no OIDC provenance; that is expected.
 
 The workflow's version-exists check is only for idempotent reruns. It does not validate a new trusted publisher.
 
@@ -90,17 +90,17 @@ npm version patch --no-git-tag-version
 
 # 2. Commit the version bump
 git add package.json bun.lock
-git commit -m "release: v0.2.1"
+git commit -m "release: v0.2.2"
 git push
 
 # 3. Tag and push the tag
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 The tag must match `package.json`:
 
-- tag `v0.2.1` → version `0.2.1`
+- tag `v0.2.2` → version `0.2.2`
 
 The workflow runs typecheck and tests, publishes with OIDC and automatic provenance, and creates a GitHub release.
 
@@ -127,7 +127,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.2.1"]
+  "plugins": ["opencode-flowgraph@0.2.2"]
 }
 ```
 
@@ -147,7 +147,7 @@ OpenCode loads the published package directly. No clone, build, or local path is
 Publish a fixed patch version and deprecate the broken one:
 
 ```sh
-npm deprecate opencode-flowgraph@0.2.1 "Broken release; use 0.2.2"
+npm deprecate opencode-flowgraph@0.2.2 "Broken release; use 0.2.3"
 ```
 
 Do not rewrite tags. The workflow publishes exactly the tagged commit.

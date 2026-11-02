@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.2.0"]
+  "plugins": ["opencode-flowgraph@0.2.1"]
 }
 ```
 
@@ -46,14 +46,14 @@ A local directory needs a root `index.ts` (server) and `rpc.ts` (shared contract
 
 ## Migrating from 0.1.x
 
-Version `0.2.0` is a full rename:
+Version `0.2.1` is a full rename:
 
 - npm package: `opencode-agent-workflows` → `opencode-flowgraph`
 - plugin ID: `agent-workflows` → `flowgraph`
 - RPC ID: `agent_workflows` → `flowgraph`
 - reporting tool: `agent_workflows_report` → `flowgraph_report`
 
-Update the plugin entry in `opencode.json(c)` and any agent prompts that call the reporting tool. Runs stored under the old plugin ID are not visible to `0.2.0`; start new runs.
+Update the plugin entry in `opencode.json(c)` and any agent prompts that call the reporting tool. Runs stored under the old plugin ID are not visible to `0.2.1`; start new runs.
 
 ## Agent requirements
 
