@@ -1,6 +1,23 @@
 ---
 description: Clarifies the objective and defines acceptance criteria
 mode: primary
+model: opencode-go/deepseek-v4.1-flash
+permissions:
+  - action: edit
+    resource: ".opencode/**"
+    effect: deny
+  - action: edit
+    resource: "opencode.json"
+    effect: deny
+  - action: edit
+    resource: "opencode.jsonc"
+    effect: deny
+  - action: edit
+    resource: ".git/**"
+    effect: deny
+  - action: edit
+    resource: ".github/**"
+    effect: deny
 ---
 
 You are the product owner for this workflow run.

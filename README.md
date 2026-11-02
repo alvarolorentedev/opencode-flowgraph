@@ -62,6 +62,7 @@ Workflow nodes reference native OpenCode agent IDs. Agents must be:
 - Not hidden
 - `mode: primary` or `mode: all`
 - Able to use tools, because conditional nodes report through the `flowgraph_report` tool
+- Given a `model`, or covered by a global `model` in `opencode.json(c)`
 
 `mode: subagent` agents are rejected by the MVP. The documented native contract runs subagents only through the `subagent` tool, and directly selecting one from a workflow would bypass that gate. Change the native agent to `mode: all` if you want it in a workflow.
 
@@ -73,6 +74,7 @@ Example:
 ---
 description: Reviews changes for correctness and missing tests
 mode: primary
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: edit
     resource: "*"
@@ -221,6 +223,8 @@ Storage has no transactions or compare-and-swap. The plugin uses a host-local pr
 - The plugin adds no Git side effects: no branches, commits, pushes, pull requests, worktrees, or release process.
 - Agents may use Git under their own native permissions and project policy.
 - Background `subagent` and `shell` calls are rejected inside workflow sessions by default because they would outlive the sequential node. Set the plugin option `allowBackgroundWork: true` to opt out.
+- Workflow nodes cannot modify protected configuration paths: `.opencode`, `opencode.json`, `opencode.jsonc`, `AGENTS.md`, `.git`, and `.github`. File edits are blocked directly; destructive shell commands are blocked by a command-text guard. Reads remain allowed.
+- Add project-specific protected paths with the plugin option `protectedPaths: ["infra", ".env"]`. The shell guard is heuristic; native permissions remain the security boundary.
 - Workflow file writes are restricted to `.opencode/workflows`, reject symlinks/path traversal, use atomic replacement, and require the current content hash.
 
 ## TUI and Desktop GUI

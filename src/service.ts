@@ -136,16 +136,23 @@ export class WorkflowService {
     this.now = deps.now ?? Date.now
   }
 
-  private async agents() {
-    return this.native.listAgents()
+  private async validationContext() {
+    const [agents, defaultModel] = await Promise.all([
+      this.native.listAgents(),
+      this.native.getDefaultModel().catch(() => undefined),
+    ])
+    return { agents, hasDefaultModel: defaultModel !== undefined }
   }
 
-  private validate(workflow: WorkflowDefinition, agents: Awaited<ReturnType<NativeRuntime["listAgents"]>>): WorkflowValidation {
-    return validateWorkflow(workflow, agents)
+  private validate(
+    workflow: WorkflowDefinition,
+    context: Awaited<ReturnType<WorkflowService["validationContext"]>>,
+  ): WorkflowValidation {
+    return validateWorkflow(workflow, context.agents, { hasDefaultModel: context.hasDefaultModel })
   }
 
   async listWorkflows(): Promise<{ workflows: WorkflowSummary[]; directory: string }> {
-    const agents = await this.agents()
+    const context = await this.validationContext()
     const ids = await this.repo.listIDs()
     const workflows: WorkflowSummary[] = []
     for (const id of ids) {
@@ -161,7 +168,7 @@ export class WorkflowService {
           })
           continue
         }
-        const validation = this.validate(file.workflow, agents)
+        const validation = this.validate(file.workflow, context)
         workflows.push({
           id,
           name: file.workflow.name,
@@ -195,7 +202,7 @@ export class WorkflowService {
         warnings: file.warnings,
       }
     }
-    const validation = this.validate(file.workflow, await this.agents())
+    const validation = this.validate(file.workflow, await this.validationContext())
     return {
       id: workflowID,
       hash: file.hash,
@@ -213,7 +220,7 @@ export class WorkflowService {
   async validateWorkflowSource(source: string, workflowID?: string): Promise<ValidationView> {
     const parsed = parseWorkflowSource(source, workflowID === undefined ? {} : { workflowID })
     if (!parsed.workflow) return { valid: false, errors: parsed.errors, warnings: parsed.warnings }
-    const validation = this.validate(parsed.workflow, await this.agents())
+    const validation = this.validate(parsed.workflow, await this.validationContext())
     return {
       valid: validation.valid,
       errors: [...parsed.errors, ...validation.errors],
@@ -282,7 +289,7 @@ export class WorkflowService {
 
     const workflow = await this.repo.read(workflowID)
     if (!workflow.workflow) throw new InvalidWorkflowError("workflow validation failed", workflow.errors)
-    const validation = this.validate(workflow.workflow, await this.agents())
+    const validation = this.validate(workflow.workflow, await this.validationContext())
     if (!validation.valid) throw new InvalidWorkflowError("workflow validation failed", validation.errors)
 
     const all = await this.store.listRuns(this.project.id)

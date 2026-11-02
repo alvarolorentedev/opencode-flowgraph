@@ -67,8 +67,14 @@ export default Plugin.define({
     const reportTool = new ReportTool(ctx, store, invocations)
     await reportTool.register()
     await reportTool.requireTool()
+    const protectedPaths = Array.isArray(ctx.options.protectedPaths)
+      ? ctx.options.protectedPaths.filter(
+          (value: unknown): value is string => typeof value === "string" && value.trim().length > 0,
+        )
+      : []
     await registerToolHooks(ctx, invocations, {
       allowBackgroundWork: ctx.options.allowBackgroundWork === true,
+      protectedPaths,
     })
 
     const service = new WorkflowService({

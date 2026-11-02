@@ -123,6 +123,20 @@ describe("graph validation", () => {
     expect(subagent.valid).toBe(false)
     expect(subagent.errors.some((error) => error.code === "subagent_agent_not_selectable")).toBe(true)
   })
+
+  it("requires a model on each agent when there is no default model", () => {
+    const parsed = parseWorkflowSource(valid, { workflowID: "development" }).workflow!
+    const missing = validateWorkflow(parsed, agents, { hasDefaultModel: false })
+    expect(missing.valid).toBe(false)
+    expect(missing.errors.filter((error) => error.code === "agent_missing_model")).toHaveLength(2)
+
+    const withModels = validateWorkflow(
+      parsed,
+      agents.map((agent) => ({ ...agent, model: { providerID: "test", id: "model" } })),
+      { hasDefaultModel: false },
+    )
+    expect(withModels.valid).toBe(true)
+  })
 })
 
 describe("mermaid generation", () => {

@@ -32,7 +32,9 @@ export type WorkflowValidation = {
 export function resolveAgents(
   workflow: WorkflowDefinition,
   agents: readonly AgentDescriptor[],
+  options: { hasDefaultModel?: boolean } = {},
 ): { resolutions: AgentResolution[]; errors: Diagnostic[] } {
+  const hasDefaultModel = options.hasDefaultModel ?? true
   const byId = new Map(agents.map((agent) => [agent.id, agent]))
   const resolutions: AgentResolution[] = []
   const errors: Diagnostic[] = []
@@ -85,6 +87,24 @@ export function resolveAgents(
       })
       continue
     }
+    if (agent.model === undefined && !hasDefaultModel) {
+      resolutions.push({
+        agentID: node.agent,
+        resolved: false,
+        mode: agent.mode,
+        hidden: false,
+        name: agent.name,
+        error: "missing model",
+      })
+      errors.push({
+        path: `nodes.${nodeId}.agent`,
+        message:
+          `agent "${node.agent}" has no model and no default model is configured; ` +
+          `set a model on the agent or set "model" in opencode.json(c).`,
+        code: "agent_missing_model",
+      })
+      continue
+    }
     resolutions.push({
       agentID: node.agent,
       resolved: true,
@@ -100,10 +120,11 @@ export function resolveAgents(
 export function validateWorkflow(
   workflow: WorkflowDefinition,
   agents: readonly AgentDescriptor[],
+  options: { hasDefaultModel?: boolean } = {},
 ): WorkflowValidation {
   const graph = buildGraph(workflow)
   const graphResult = validateGraph(workflow, graph)
-  const agentResult = resolveAgents(workflow, agents)
+  const agentResult = resolveAgents(workflow, agents, options)
   const errors = [...graphResult.errors, ...agentResult.errors]
   const warnings = [...graphResult.warnings, ...graph.warnings]
 

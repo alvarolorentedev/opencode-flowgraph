@@ -1,6 +1,7 @@
 ---
 description: Reviews changes for correctness and missing tests
 mode: primary
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: edit
     resource: "*"

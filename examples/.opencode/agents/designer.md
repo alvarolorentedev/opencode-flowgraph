@@ -1,6 +1,7 @@
 ---
 description: Turns requirements into a simple implementation plan
 mode: primary
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: edit
     resource: "*"

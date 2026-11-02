@@ -1,6 +1,7 @@
 ---
 description: Validates the implementation against acceptance criteria
 mode: primary
+model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: edit
     resource: "*"
