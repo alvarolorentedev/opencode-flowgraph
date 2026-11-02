@@ -18,7 +18,7 @@ export type ProjectLock = {
 }
 
 export class ProjectLockManager {
-  private readonly base = path.join(os.tmpdir(), "opencode-agent-workflows", "locks")
+  private readonly base = path.join(os.tmpdir(), "opencode-flowgraph", "locks")
   private readonly held = new Map<string, { release: () => Promise<void>; lock: ProjectLock }>()
 
   async acquire(projectID: string, canonical: string): Promise<ProjectLock> {

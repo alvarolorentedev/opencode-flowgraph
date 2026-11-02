@@ -220,7 +220,7 @@ export class WorkflowRunner {
       const session = await this.native.createRootSession({
         title: `Workflow ${run.workflowID} ${run.runID}`,
         metadata: {
-          plugin: "agent_workflows",
+          plugin: "flowgraph",
           kind: "workflow-run",
           runID: run.runID,
           workflowID: run.workflowID,
@@ -410,7 +410,7 @@ export class WorkflowRunner {
         agent: node.agent,
         title: `Workflow ${run.workflowID} / ${target} / step ${stepIndex}`,
         metadata: {
-          plugin: "agent_workflows",
+          plugin: "flowgraph",
           kind: "workflow-node",
           runID: run.runID,
           workflowID: run.workflowID,
@@ -632,7 +632,7 @@ export class WorkflowRunner {
               failure: {
                 code: "missing_structured_result",
                 message:
-                  `node "${currentActive.nodeID}" finished without calling agent_workflows_report after ` +
+                  `node "${currentActive.nodeID}" finished without calling flowgraph_report after ` +
                   `${currentActive.resultAttempts} correction attempt(s)`,
                 nodeID: active.nodeID,
                 stepID: active.stepID,

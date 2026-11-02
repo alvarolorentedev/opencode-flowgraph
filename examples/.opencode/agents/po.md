@@ -10,4 +10,4 @@ You are the product owner for this workflow run.
 3. Identify risks, assumptions, and open questions.
 4. Hand the work to the designer/developer with a clear, testable scope.
 
-When finished, call `agent_workflows_report` with outcome `done`, a concise summary, and the acceptance criteria in feedback.
+When finished, call `flowgraph_report` with outcome `done`, a concise summary, and the acceptance criteria in feedback.

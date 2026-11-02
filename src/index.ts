@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin"
 import type { CapabilitiesOutput } from "./contract.js"
-import { AgentWorkflowsRpc } from "./rpc.js"
+import { FlowgraphRpc } from "./rpc.js"
 import { createRpcHandlers } from "./rpc/handlers.js"
 import { WorkflowService } from "./service.js"
 import { WorkflowRepository } from "./workflow/loader.js"
@@ -37,7 +37,7 @@ function numberOption(value: unknown, fallback: number): number {
 }
 
 export default Plugin.define({
-  id: "agent-workflows",
+  id: "flowgraph",
   async setup(ctx) {
     const instanceID = newInstanceID()
     const project = {
@@ -83,7 +83,7 @@ export default Plugin.define({
 
     const capabilities: CapabilitiesOutput = {
       plugin: { name: PLUGIN_NAME, version: PLUGIN_VERSION },
-      rpc: { id: "agent_workflows", version: 1 },
+      rpc: { id: "flowgraph", version: 1 },
       workflowSchemaVersion: 1,
       openCodeVersion: ctx.app.version,
       features: {
@@ -112,12 +112,12 @@ export default Plugin.define({
       },
     }
 
-    const rpcRegistration = await ctx.rpc.register(AgentWorkflowsRpc as never, createRpcHandlers(service, capabilities) as never)
+    const rpcRegistration = await ctx.rpc.register(FlowgraphRpc as never, createRpcHandlers(service, capabilities) as never)
     emitRunUpdated = (payload) => rpcRegistration.events.emit("runUpdated", payload as never)
 
     const recoveryTimer = setTimeout(() => {
       void service.recover().catch((error) => {
-        console.error("agent-workflows: recovery failed", error instanceof Error ? error.message : "unknown error")
+        console.error("flowgraph: recovery failed", error instanceof Error ? error.message : "unknown error")
       })
     }, 250)
     recoveryTimer.unref?.()

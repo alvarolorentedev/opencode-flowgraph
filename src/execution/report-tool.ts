@@ -55,28 +55,28 @@ export class ReportTool {
   async register(): Promise<void> {
     await this.ctx.tool.transform((editor) => {
       editor.namespace({
-        name: "agent_workflows",
+        name: "flowgraph",
         description: "Structured reporting for OpenCode agent workflow nodes.",
       })
       editor.add({
         name: "report",
         description:
           "Report the structured result of the current agent workflow node. " +
-          "Only available inside sessions started by the OpenCode agent workflows plugin. " +
+          "Only available inside sessions started by the OpenCode flowgraph plugin. " +
           "Call this exactly once when the node is finished. The orchestrator, not the agent, chooses the next node.",
         input: NodeResultSchema,
-        options: { namespace: "agent_workflows", codemode: false },
+        options: { namespace: "flowgraph", codemode: false },
         execute: async (input: NodeResult, context) => {
           const invocation = this.invocations.get(context.sessionID)
           if (!invocation) {
             throw new Error(
-              "agent_workflows_report is only available during an active workflow node session. " +
+              "flowgraph_report is only available during an active workflow node session. " +
                 "Finish the node normally or use the workflow RPC API to start a run.",
             )
           }
           if (context.signal.aborted) throw new Error("workflow node was cancelled")
           if (invocation.reported >= 5) {
-            throw new Error("too many workflow reports for this step; stop calling agent_workflows_report")
+            throw new Error("too many workflow reports for this step; stop calling flowgraph_report")
           }
           if (invocation.allowedOutcomes.length > 0 && !invocation.allowedOutcomes.includes(input.outcome)) {
             throw new Error(
@@ -106,8 +106,8 @@ export class ReportTool {
 
   async requireTool(): Promise<void> {
     const tools = await this.ctx.tool.list()
-    if (!tools.some((tool) => tool.id === "agent_workflows_report")) {
-      throw new Error("agent_workflows_report tool was not registered")
+    if (!tools.some((tool) => tool.id === "flowgraph_report")) {
+      throw new Error("flowgraph_report tool was not registered")
     }
   }
 }

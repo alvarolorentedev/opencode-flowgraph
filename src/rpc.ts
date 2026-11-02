@@ -44,8 +44,8 @@ const errors = {
   unavailable: DeclaredErrorSchema,
 } as const
 
-export const AgentWorkflowsRpc = Rpc.define({
-  id: "agent_workflows",
+export const FlowgraphRpc = Rpc.define({
+  id: "flowgraph",
   methods: {
     capabilities: {
       input: z.object({}).strict().optional(),
@@ -122,5 +122,5 @@ export const AgentWorkflowsRpc = Rpc.define({
   },
 })
 
-export type AgentWorkflowsRpcDefinition = typeof AgentWorkflowsRpc
+export type FlowgraphRpcDefinition = typeof FlowgraphRpc
 export type { WorkflowView, ValidationView, CapabilitiesOutput, RunDetailView, StepView } from "./contract.js"

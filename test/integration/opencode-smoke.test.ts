@@ -49,13 +49,13 @@ nodes:
 `,
       )
 
-      const capabilities = (await api(dir, "post", "/api/rpc/agent_workflows/capabilities", '{"input":{}}')) as {
+      const capabilities = (await api(dir, "post", "/api/rpc/flowgraph/capabilities", '{"input":{}}')) as {
         output: { rpc: { id: string }; features: { structuredResults: string } }
       }
-      expect(capabilities.output.rpc.id).toBe("agent_workflows")
+      expect(capabilities.output.rpc.id).toBe("flowgraph")
       expect(capabilities.output.features.structuredResults).toBe("tool")
 
-      const workflows = (await api(dir, "post", "/api/rpc/agent_workflows/listWorkflows", '{"input":{}}')) as {
+      const workflows = (await api(dir, "post", "/api/rpc/flowgraph/listWorkflows", '{"input":{}}')) as {
         output: { workflows: Array<{ id: string; valid: boolean }> }
       }
       expect(workflows.output.workflows.find((workflow) => workflow.id === "sample")?.valid).toBe(true)
@@ -63,7 +63,7 @@ nodes:
       const workflow = (await api(
         dir,
         "post",
-        "/api/rpc/agent_workflows/getWorkflow",
+        "/api/rpc/flowgraph/getWorkflow",
         JSON.stringify({ input: { workflowID: "sample" } }),
       )) as { output: { valid: boolean; mermaid: string; definition?: { name: string } } }
       expect(workflow.output.valid).toBe(true)
@@ -73,7 +73,7 @@ nodes:
       const saved = (await api(
         dir,
         "post",
-        "/api/rpc/agent_workflows/saveWorkflow",
+        "/api/rpc/flowgraph/saveWorkflow",
         JSON.stringify({
           input: {
             workflowID: "saved",
@@ -93,7 +93,7 @@ nodes:
       const deleted = (await api(
         dir,
         "post",
-        "/api/rpc/agent_workflows/deleteWorkflow",
+        "/api/rpc/flowgraph/deleteWorkflow",
         JSON.stringify({ input: { workflowID: "saved", expectedHash: saved.output.hash } }),
       )) as { output: { deleted: boolean } }
       expect(deleted.output.deleted).toBe(true)

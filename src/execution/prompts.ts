@@ -95,7 +95,7 @@ export function buildNodePrompt(input: NodePromptInput): string {
     `1. Perform your native agent role for the objective and the relevant previous results.`,
     `2. Do not edit workflow files, agent definition files, or OpenCode configuration.`,
     `3. Do not create Git branches, commits, pushes, pull requests, or worktrees unless your native agent role explicitly requires it.`,
-    `4. When you are finished, call the \`agent_workflows_report\` tool exactly once with:`,
+    `4. When you are finished, call the \`flowgraph_report\` tool exactly once with:`,
     `   {`,
     `     "outcome": "<outcome>",`,
     `     "summary": "<concise summary of what you did or found>",`,
@@ -117,7 +117,7 @@ export function buildReportCorrectionPrompt(graph: WorkflowGraph, nodeID: string
   const outcomes = validOutcomes(graph, nodeID)
   return [
     `You finished the workflow node but did not submit a valid structured result.`,
-    `Call the \`agent_workflows_report\` tool now, exactly once.`,
+    `Call the \`flowgraph_report\` tool now, exactly once.`,
     outcomes.length === 0
       ? `Use outcome "done".`
       : `Use one of these outcomes: ${outcomes.join(", ")}.`,

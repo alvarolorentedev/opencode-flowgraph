@@ -17,7 +17,7 @@
 | `workflow/mermaid.ts` | Pure, escaped, deterministic Mermaid generation |
 | `workflow/validator.ts` | Semantic validation and native agent resolution |
 | `execution/native-agents.ts` | Typed adapter over OpenCode agents, sessions, and permissions |
-| `execution/report-tool.ts` | `agent_workflows_report` tool and active-session registry |
+| `execution/report-tool.ts` | `flowgraph_report` tool and active-session registry |
 | `execution/tool-hooks.ts` | Workflow-session background-work policy |
 | `execution/prompts.ts` | Bounded context handoff prompts |
 | `execution/results.ts` | Result/audit summarization and usage estimates |

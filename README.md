@@ -1,4 +1,4 @@
-# opencode-agent-workflows
+# opencode-flowgraph
 
 An OpenCode V2 plugin for user-defined multi-agent workflows.
 
@@ -19,7 +19,7 @@ Install from npm by adding the plugin to `opencode.jsonc`:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-agent-workflows"]
+  "plugins": ["opencode-flowgraph"]
 }
 ```
 
@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-agent-workflows@0.1.6"]
+  "plugins": ["opencode-flowgraph@0.2.0"]
 }
 ```
 
@@ -44,13 +44,24 @@ For local development, point at this repository:
 
 A local directory needs a root `index.ts` (server) and `rpc.ts` (shared contract); this repository provides both. Release automation is documented in [`docs/releasing.md`](docs/releasing.md).
 
+## Migrating from 0.1.x
+
+Version `0.2.0` is a full rename:
+
+- npm package: `opencode-agent-workflows` → `opencode-flowgraph`
+- plugin ID: `agent-workflows` → `flowgraph`
+- RPC ID: `agent_workflows` → `flowgraph`
+- reporting tool: `agent_workflows_report` → `flowgraph_report`
+
+Update the plugin entry in `opencode.json(c)` and any agent prompts that call the reporting tool. Runs stored under the old plugin ID are not visible to `0.2.0`; start new runs.
+
 ## Agent requirements
 
 Workflow nodes reference native OpenCode agent IDs. Agents must be:
 
 - Not hidden
 - `mode: primary` or `mode: all`
-- Able to use tools, because conditional nodes report through the `agent_workflows_report` tool
+- Able to use tools, because conditional nodes report through the `flowgraph_report` tool
 
 `mode: subagent` agents are rejected by the MVP. The documented native contract runs subagents only through the `subagent` tool, and directly selecting one from a workflow would bypass that gate. Change the native agent to `mode: all` if you want it in a workflow.
 
@@ -127,7 +138,7 @@ Rules:
 
 V2 session prompts do not support a native response schema. The plugin registers a typed tool:
 
-`agent_workflows_report`
+`flowgraph_report`
 
 At the end of each node the agent calls it with:
 
@@ -150,7 +161,7 @@ The tool is registered for the whole location because OpenCode plugin tools are 
 
 ## RPC
 
-The shared contract is exported from `opencode-agent-workflows/rpc`.
+The shared contract is exported from `opencode-flowgraph/rpc`.
 
 | Method | Purpose |
 |---|---|
@@ -173,10 +184,10 @@ Event: `runUpdated` with project, run, workflow, status, current node, revision,
 
 ```ts
 import { OpenCode } from "@opencode/client"
-import { AgentWorkflowsRpc } from "opencode-agent-workflows/rpc"
+import { FlowgraphRpc } from "opencode-flowgraph/rpc"
 
 const client = OpenCode.make({ baseUrl, headers })
-const workflows = client.rpc(AgentWorkflowsRpc)
+const workflows = client.rpc(FlowgraphRpc)
 
 const result = await workflows.listWorkflows(undefined, {
   location: { directory: "/workspace/project" },

@@ -193,7 +193,7 @@ export const RunControlOutputSchema = z.object({ run: RunSummarySchema }).strict
 export const CapabilitiesOutputSchema = z
   .object({
     plugin: z.object({ name: z.string(), version: z.string() }).strict(),
-    rpc: z.object({ id: z.literal("agent_workflows"), version: z.literal(1) }).strict(),
+    rpc: z.object({ id: z.literal("flowgraph"), version: z.literal(1) }).strict(),
     workflowSchemaVersion: z.literal(1),
     openCodeVersion: z.string(),
     features: z

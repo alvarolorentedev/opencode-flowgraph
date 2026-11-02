@@ -29,7 +29,7 @@ describe("node prompts", () => {
     expect(prompt).toContain("sess_node")
     expect(prompt).toContain("changes_requested")
     expect(prompt).toContain("approved")
-    expect(prompt).toContain("agent_workflows_report")
+    expect(prompt).toContain("flowgraph_report")
     expect(prompt).not.toContain("version: 1")
   })
 
@@ -58,7 +58,7 @@ describe("node prompts", () => {
     const workflow = parseWorkflowSource(source, { workflowID: "sample" }).workflow!
     const graph = buildGraph(workflow)
     const prompt = buildReportCorrectionPrompt(graph, "reviewer")
-    expect(prompt).toContain("agent_workflows_report")
+    expect(prompt).toContain("flowgraph_report")
     expect(prompt).toContain("approved")
   })
 })

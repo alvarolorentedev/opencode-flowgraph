@@ -21,11 +21,11 @@ npm login
 npm publish --access public
 ```
 
-`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.1.0` and creates the package on npm.
+`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.2.0` and creates the package on npm.
 
 Then configure the trusted publisher:
 
-1. Open `https://www.npmjs.com/package/opencode-agent-workflows`
+1. Open `https://www.npmjs.com/package/opencode-flowgraph`
 2. Open **Settings** and find **Trusted Publisher**
 3. Choose **GitHub Actions**
 4. Enter:
@@ -41,7 +41,7 @@ After the configuration is saved, it must complete its first successful publish 
 You can also configure it with npm CLI 11.15+:
 
 ```sh
-npm trust github opencode-agent-workflows \
+npm trust github opencode-flowgraph \
   --repo alvarolorentedev/opencode-flowgraph \
   --file release.yml \
   --allow-publish
@@ -50,7 +50,7 @@ npm trust github opencode-agent-workflows \
 Verify:
 
 ```sh
-npm trust list opencode-agent-workflows
+npm trust list opencode-flowgraph
 ```
 
 After the trusted publisher works, optionally restrict token publishing:
@@ -71,14 +71,14 @@ After configuring the trusted publisher, publish the next patch through GitHub A
 ```sh
 npm version patch --no-git-tag-version
 git add package.json bun.lock
-git commit -m "release: v0.1.1"
+git commit -m "release: v0.2.1"
 git push
 
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-The workflow publishes `0.1.1` through OIDC and completes the trusted-publisher validation. The bootstrap `0.1.0` has no OIDC provenance; that is expected.
+The workflow publishes `0.2.1` through OIDC and completes the trusted-publisher validation. The bootstrap `0.2.0` has no OIDC provenance; that is expected.
 
 The workflow's version-exists check is only for idempotent reruns. It does not validate a new trusted publisher.
 
@@ -90,17 +90,17 @@ npm version patch --no-git-tag-version
 
 # 2. Commit the version bump
 git add package.json bun.lock
-git commit -m "release: v0.1.1"
+git commit -m "release: v0.2.1"
 git push
 
 # 3. Tag and push the tag
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 The tag must match `package.json`:
 
-- tag `v0.1.1` → version `0.1.1`
+- tag `v0.2.1` → version `0.2.1`
 
 The workflow runs typecheck and tests, publishes with OIDC and automatic provenance, and creates a GitHub release.
 
@@ -109,8 +109,8 @@ You can also create the tag through the GitHub Releases UI. Make sure the tag st
 ## Verify
 
 ```sh
-npm view opencode-agent-workflows version
-npm view opencode-agent-workflows dist-tags
+npm view opencode-flowgraph version
+npm view opencode-flowgraph dist-tags
 npm audit signatures
 ```
 
@@ -119,7 +119,7 @@ npm audit signatures
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-agent-workflows"]
+  "plugins": ["opencode-flowgraph"]
 }
 ```
 
@@ -127,7 +127,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-agent-workflows@0.1.1"]
+  "plugins": ["opencode-flowgraph@0.2.1"]
 }
 ```
 
@@ -136,8 +136,8 @@ OpenCode loads the published package directly. No clone, build, or local path is
 ## Versioning and compatibility
 
 - Use semver.
-- Keep the plugin ID `agent-workflows` stable; changing it changes the plugin storage namespace.
-- Keep the RPC ID `agent_workflows` stable.
+- Keep the plugin ID `flowgraph` stable; changing it changes the plugin storage namespace.
+- Keep the RPC ID `flowgraph` stable.
 - The current peer range is `@opencode/plugin >=2.0.32 <3`.
 - A breaking RPC or workflow-schema change should be a major version.
 - Prefer `npm deprecate` over unpublishing.
@@ -147,7 +147,7 @@ OpenCode loads the published package directly. No clone, build, or local path is
 Publish a fixed patch version and deprecate the broken one:
 
 ```sh
-npm deprecate opencode-agent-workflows@0.1.1 "Broken release; use 0.1.2"
+npm deprecate opencode-flowgraph@0.2.1 "Broken release; use 0.2.2"
 ```
 
 Do not rewrite tags. The workflow publishes exactly the tagged commit.

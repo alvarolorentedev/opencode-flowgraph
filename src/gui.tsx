@@ -1,7 +1,7 @@
 import { Show, createEffect, createSignal, on, onCleanup } from "solid-js"
 import { Command, MenuItem, Panel, Plugin, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
 import mermaid from "mermaid"
-import { AgentWorkflowsRpc } from "./rpc.js"
+import { FlowgraphRpc } from "./rpc.js"
 import type { RunGraphOutput } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
 import { errorDetail } from "./util/redact.js"
@@ -55,7 +55,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
   let renderSequence = 0
 
   const location = () => ({ directory: props.session.directory })
-  const rpc = () => ctx.client.rpc(AgentWorkflowsRpc)
+  const rpc = () => ctx.client.rpc(FlowgraphRpc)
 
   const load = async (runID: string): Promise<boolean> => {
     try {
@@ -327,7 +327,7 @@ export default Plugin.define({
       }
       try {
         const result = await ctx.client
-          .rpc(AgentWorkflowsRpc)
+          .rpc(FlowgraphRpc)
           .listWorkflows(undefined, { location: { directory: session.directory } })
         if (result.workflows.length === 0) {
           ctx.toast.show({
@@ -363,7 +363,7 @@ export default Plugin.define({
         return
       }
       try {
-        const run = await ctx.client.rpc(AgentWorkflowsRpc).startRun(
+        const run = await ctx.client.rpc(FlowgraphRpc).startRun(
           { workflowID, objective, requestID: requestID() },
           { location: { directory: session.directory } },
         )

@@ -1,21 +1,21 @@
 # RPC
 
-The plugin registers the `agent_workflows` RPC at each OpenCode location where it is loaded.
+The plugin registers the `flowgraph` RPC at each OpenCode location where it is loaded.
 
 ## Contract
 
 ```ts
-import { AgentWorkflowsRpc } from "opencode-agent-workflows/rpc"
+import { FlowgraphRpc } from "opencode-flowgraph/rpc"
 ```
 
 Use it with the official client:
 
 ```ts
 import { OpenCode } from "@opencode/client"
-import { AgentWorkflowsRpc } from "opencode-agent-workflows/rpc"
+import { FlowgraphRpc } from "opencode-flowgraph/rpc"
 
 const client = OpenCode.make({ baseUrl, headers })
-const workflows = client.rpc(AgentWorkflowsRpc)
+const workflows = client.rpc(FlowgraphRpc)
 const location = { directory: "/workspace/project" }
 
 const workflowsList = await workflows.listWorkflows(undefined, { location })
@@ -48,7 +48,7 @@ Events are live-only. After reconnecting, call `listRuns` or `getRun`.
 The generic RPC route is:
 
 ```text
-POST /api/rpc/agent_workflows/{method}
+POST /api/rpc/flowgraph/{method}
 ```
 
 The body is `{ "input": ... }`, and the response is `{ "output": ... }`. Pass `location[directory]` as a query parameter when the request is not already location-scoped.

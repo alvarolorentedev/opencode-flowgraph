@@ -64,12 +64,12 @@ jobs:
         run: |
           set -euo pipefail
           PKG_VERSION="$(node -p "require('./package.json').version")"
-          if ! npm view opencode-agent-workflows version >/dev/null 2>&1; then
-            echo "opencode-agent-workflows is not on npm yet. Complete the first-publish bootstrap in docs/releasing.md." >&2
+          if ! npm view opencode-flowgraph version >/dev/null 2>&1; then
+            echo "opencode-flowgraph is not on npm yet. Complete the first-publish bootstrap in docs/releasing.md." >&2
             exit 1
           fi
-          if npm view "opencode-agent-workflows@${PKG_VERSION}" version >/dev/null 2>&1; then
-            echo "opencode-agent-workflows@${PKG_VERSION} is already published; skipping publish."
+          if npm view "opencode-flowgraph@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "opencode-flowgraph@${PKG_VERSION} is already published; skipping publish."
           else
             npm publish --provenance --access public
           fi

@@ -1,6 +1,6 @@
 import type { CapabilitiesOutput } from "../contract.js"
 import type { WorkflowService } from "../service.js"
-import { AgentWorkflowsRpc } from "../rpc.js"
+import { FlowgraphRpc } from "../rpc.js"
 import { toRpcError, type ErrorContext } from "./errors.js"
 
 export function createRpcHandlers(service: WorkflowService, capabilities: CapabilitiesOutput) {
@@ -125,5 +125,5 @@ export function createRpcHandlers(service: WorkflowService, capabilities: Capabi
         throw toRpcError(context, error)
       }
     },
-  } satisfies Record<keyof typeof AgentWorkflowsRpc.methods, unknown>
+  } satisfies Record<keyof typeof FlowgraphRpc.methods, unknown>
 }

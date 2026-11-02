@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { z } from "zod"
-import { AgentWorkflowsRpc } from "../../src/rpc.js"
+import { FlowgraphRpc } from "../../src/rpc.js"
 import {
   CapabilitiesOutputSchema,
   RunUpdatedEventSchema,
@@ -8,9 +8,9 @@ import {
   ValidateWorkflowInputSchema,
 } from "../../src/contract.js"
 
-describe("agent_workflows RPC contract", () => {
+describe("flowgraph RPC contract", () => {
   it("exposes every required method and event", () => {
-    expect(Object.keys(AgentWorkflowsRpc.methods).sort()).toEqual(
+    expect(Object.keys(FlowgraphRpc.methods).sort()).toEqual(
       [
         "cancelRun",
         "capabilities",
@@ -28,15 +28,15 @@ describe("agent_workflows RPC contract", () => {
         "validateWorkflow",
       ].sort(),
     )
-    expect(Object.keys(AgentWorkflowsRpc.events)).toEqual(["runUpdated"])
+    expect(Object.keys(FlowgraphRpc.events)).toEqual(["runUpdated"])
   })
 
   it("validates startRun input", () => {
-    const schema = AgentWorkflowsRpc.methods.startRun.input as unknown as z.ZodTypeAny
+    const schema = FlowgraphRpc.methods.startRun.input as unknown as z.ZodTypeAny
     expect(schema.safeParse({ workflowID: "sample", objective: "do it", requestID: "r1" }).success).toBe(true)
     expect(schema.safeParse({ workflowID: "../escape", objective: "do it", requestID: "r1" }).success).toBe(false)
     expect(
-      (AgentWorkflowsRpc.methods.getRunGraph.input as unknown as z.ZodTypeAny).safeParse({ runID: "run_1" }).success,
+      (FlowgraphRpc.methods.getRunGraph.input as unknown as z.ZodTypeAny).safeParse({ runID: "run_1" }).success,
     ).toBe(true)
     expect(schema.safeParse({ workflowID: "sample", objective: "", requestID: "r1" }).success).toBe(false)
   })
@@ -49,8 +49,8 @@ describe("agent_workflows RPC contract", () => {
   it("validates the capabilities and runUpdated payloads", () => {
     expect(
       CapabilitiesOutputSchema.safeParse({
-        plugin: { name: "opencode-agent-workflows", version: "0.1.6" },
-        rpc: { id: "agent_workflows", version: 1 },
+        plugin: { name: "opencode-flowgraph", version: "0.2.0" },
+        rpc: { id: "flowgraph", version: 1 },
         workflowSchemaVersion: 1,
         openCodeVersion: "2.0.32",
         features: {

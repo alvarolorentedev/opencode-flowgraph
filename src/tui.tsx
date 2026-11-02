@@ -2,13 +2,13 @@
 import { Show, createEffect, createSignal, on, onCleanup } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
-import { AgentWorkflowsRpc } from "./rpc.js"
+import { FlowgraphRpc } from "./rpc.js"
 import type { RunGraphOutput, RunGraphNode, WorkflowSummaryView } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
 
-const PANEL = "agent-workflows.graph"
+const PANEL = "flowgraph.graph"
 
 function requestID(): string {
   return `tui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -39,7 +39,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
   const [error, setError] = createSignal<string>()
   const [loading, setLoading] = createSignal(true)
   const location = () => context.location ?? context.data.location.default()
-  const rpc = () => context.client.rpc(AgentWorkflowsRpc)
+  const rpc = () => context.client.rpc(FlowgraphRpc)
 
   const load = async (runID: string): Promise<boolean> => {
     try {
@@ -187,18 +187,18 @@ function WorkflowPanel(props: { panel: PanelInput }) {
     priority: 20,
     enabled: () => context.ui.panel.current()?.name === PANEL,
     commands: [
-      { id: "agent-workflows.graph.refresh", title: "Refresh workflow graph", bind: "r", run: () => {
+      { id: "flowgraph.graph.refresh", title: "Refresh workflow graph", bind: "r", run: () => {
         const current = graph()
         if (current) void load(current.runID)
       } },
-      { id: "agent-workflows.graph.open", title: "Open active workflow session", bind: "enter", run: openActive },
-      { id: "agent-workflows.graph.toggle", title: "Pause or resume workflow", bind: "p", run: () => {
+      { id: "flowgraph.graph.open", title: "Open active workflow session", bind: "enter", run: openActive },
+      { id: "flowgraph.graph.toggle", title: "Pause or resume workflow", bind: "p", run: () => {
         const current = graph()
         if (!current) return
         if (current.status === "paused" || current.status === "blocked") void resume()
         else void pause()
       } },
-      { id: "agent-workflows.graph.cancel", title: "Cancel workflow run", bind: "c", run: () => void cancel() },
+      { id: "flowgraph.graph.cancel", title: "Cancel workflow run", bind: "c", run: () => void cancel() },
     ],
   }))
 
@@ -281,10 +281,10 @@ function WorkflowPanel(props: { panel: PanelInput }) {
 }
 
 export default Plugin.define({
-  id: "agent-workflows.tui",
+  id: "flowgraph.tui",
   setup(context) {
     const location = () => context.location ?? context.data.location.default()
-    const rpc = () => context.client.rpc(AgentWorkflowsRpc)
+    const rpc = () => context.client.rpc(FlowgraphRpc)
 
     const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
       context.ui.toast.show({ message, variant })
@@ -359,16 +359,16 @@ export default Plugin.define({
       priority: 10,
       commands: [
         {
-          id: "agent-workflows.graph",
+          id: "flowgraph.graph",
           title: "Workflow",
           description: "Open the graph, list workflows, or start a run",
-          group: "Agent Workflows",
+          group: "Flowgraph",
           palette: true,
           slash: { name: "workflow", arguments: true },
           run: (input) => void runCommand(input),
         },
       ],
-      bindings: ["agent-workflows.graph"],
+      bindings: ["flowgraph.graph"],
     }))
     context.ui.slot({
       append: "session.panel",
