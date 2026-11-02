@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-agent-workflows@0.1.1"]
+  "plugins": ["opencode-agent-workflows@0.1.2"]
 }
 ```
 
@@ -163,6 +163,7 @@ The shared contract is exported from `opencode-agent-workflows/rpc`.
 | `startRun` | Start a run with an objective and idempotency key |
 | `listRuns` | List project runs |
 | `getRun` | Current state, step summaries, Mermaid, live permissions |
+| `getRunGraph` | Structured graph, active node, node sessions, Mermaid mapping, controls |
 | `getRunStep` | Full persisted step result |
 | `pauseRun` | Safe pause between nodes |
 | `resumeRun` | Resume, with explicit confirmation for ambiguous retries |
@@ -210,6 +211,17 @@ Storage has no transactions or compare-and-swap. The plugin uses a host-local pr
 - Agents may use Git under their own native permissions and project policy.
 - Background `subagent` and `shell` calls are rejected inside workflow sessions by default because they would outlive the sequential node. Set the plugin option `allowBackgroundWork: true` to opt out.
 - Workflow file writes are restricted to `.opencode/workflows`, reject symlinks/path traversal, use atomic replacement, and require the current content hash.
+
+## TUI and Desktop GUI
+
+The package ships optional UI parts beside the server part:
+
+- `./tui` adds a `Workflow graph` session panel, a `/workflow` command, active-node highlighting, and keyboard controls. See [`docs/tui.md`](docs/tui.md).
+- `./gui-experimental` adds an experimental OpenCode Desktop panel that renders the Mermaid graph, highlights the active node, and opens node sessions on click. See [`docs/gui.md`](docs/gui.md).
+
+The TUI renders a structured terminal graph rather than Mermaid. The Desktop GUI renders Mermaid. Neither requires a separate server or web app.
+
+`getRunGraph` is the shared read model for both surfaces. It returns node states, node session IDs, edges, the Mermaid source, Mermaid node IDs, and the active node.
 
 ## Mermaid
 
@@ -262,6 +274,7 @@ Releases are tag-driven GitHub Actions using npm Trusted Publishing (OIDC): type
 - Cost and token usage are provider-reported estimates, not enforced spending caps.
 - Subagent-only native agents are not supported directly.
 - Interactive question forms are outside the MVP; a waiting question may look like a running node until timeout.
+- There is no browser/web UI part. The graphical surfaces are the TUI panel and the experimental Desktop GUI panel.
 
 ## License
 

@@ -92,6 +92,7 @@ export default Plugin.define({
         pause: true,
         structuredResults: "tool",
         conservativeRecovery: true,
+        runGraph: true,
         parallelBranches: false,
         nestedWorkflows: false,
         backgroundNativeWork: false,

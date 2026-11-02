@@ -16,6 +16,7 @@ describe("agent_workflows RPC contract", () => {
         "capabilities",
         "deleteWorkflow",
         "getRun",
+        "getRunGraph",
         "getRunStep",
         "getWorkflow",
         "listRuns",
@@ -34,6 +35,9 @@ describe("agent_workflows RPC contract", () => {
     const schema = AgentWorkflowsRpc.methods.startRun.input as unknown as z.ZodTypeAny
     expect(schema.safeParse({ workflowID: "sample", objective: "do it", requestID: "r1" }).success).toBe(true)
     expect(schema.safeParse({ workflowID: "../escape", objective: "do it", requestID: "r1" }).success).toBe(false)
+    expect(
+      (AgentWorkflowsRpc.methods.getRunGraph.input as unknown as z.ZodTypeAny).safeParse({ runID: "run_1" }).success,
+    ).toBe(true)
     expect(schema.safeParse({ workflowID: "sample", objective: "", requestID: "r1" }).success).toBe(false)
   })
 
@@ -45,7 +49,7 @@ describe("agent_workflows RPC contract", () => {
   it("validates the capabilities and runUpdated payloads", () => {
     expect(
       CapabilitiesOutputSchema.safeParse({
-        plugin: { name: "opencode-agent-workflows", version: "0.1.1" },
+        plugin: { name: "opencode-agent-workflows", version: "0.1.2" },
         rpc: { id: "agent_workflows", version: 1 },
         workflowSchemaVersion: 1,
         openCodeVersion: "2.0.32",
@@ -55,6 +59,7 @@ describe("agent_workflows RPC contract", () => {
           pause: true,
           structuredResults: "tool",
           conservativeRecovery: true,
+          runGraph: true,
           parallelBranches: false,
           nestedWorkflows: false,
           backgroundNativeWork: false,

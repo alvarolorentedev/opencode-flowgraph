@@ -106,6 +106,47 @@ export const DeleteWorkflowInputSchema = z
   .strict()
 export const DeleteWorkflowOutputSchema = z.object({ deleted: z.literal(true) }).strict()
 
+export const RunGraphNodeStateSchema = z.enum(["pending", "active", "completed", "failed", "paused"])
+export const RunGraphNodeSchema = z
+  .object({
+    nodeID: z.string().min(1).max(64),
+    label: z.string().min(1).max(200),
+    agent: z.string().min(1).max(128),
+    state: RunGraphNodeStateSchema,
+    sessionIDs: z.array(z.string().min(1).max(128)).max(500),
+    stepCount: z.number().int().nonnegative(),
+  })
+  .strict()
+export const RunGraphEdgeSchema = z
+  .object({
+    from: z.string().min(1).max(64),
+    to: z.string().min(1).max(64),
+    outcome: z.string().min(1).max(32).optional(),
+    kind: z.enum(["next", "route"]),
+    terminal: z.boolean(),
+  })
+  .strict()
+export const RunGraphOutputSchema = z
+  .object({
+    runID: z.string().min(1).max(64),
+    workflowID: WorkflowIdSchema,
+    revision: z.number().int().nonnegative(),
+    status: RunStatusSchema,
+    activeNode: z.string().max(64).nullable(),
+    currentNode: z.string().max(64).nullable(),
+    nodes: z.array(RunGraphNodeSchema).max(200),
+    edges: z.array(RunGraphEdgeSchema).max(3200),
+    mermaid: z.string().max(1_000_000),
+    mermaidNodes: z.array(z.object({ nodeID: z.string().max(64), mermaidID: z.string().max(64) }).strict()).max(200),
+    activeMermaidID: z.string().max(64).nullable(),
+    controls: z.object({ canPause: z.boolean(), canResume: z.boolean(), canCancel: z.boolean() }).strict(),
+    pendingPermissions: z.array(PermissionSummarySchema).max(50),
+    blocker: z
+      .object({ type: z.string().max(80), message: z.string().max(1_000) })
+      .strict()
+      .nullable(),
+  })
+  .strict()
 export const StartRunInputSchema = z
   .object({
     workflowID: WorkflowIdSchema,
@@ -128,6 +169,7 @@ export const ListRunsInputSchema = z
   .strict()
 export const ListRunsOutputSchema = z.object({ runs: z.array(RunSummarySchema) }).strict()
 export const RunInputSchema = z.object({ runID: z.string().min(1).max(64) }).strict()
+export const GetRunGraphInputSchema = RunInputSchema
 export const RunStepInputSchema = z
   .object({
     runID: z.string().min(1).max(64),
@@ -159,6 +201,7 @@ export const CapabilitiesOutputSchema = z
         pause: z.literal(true),
         structuredResults: z.literal("tool"),
         conservativeRecovery: z.literal(true),
+        runGraph: z.literal(true),
         parallelBranches: z.literal(false),
         nestedWorkflows: z.literal(false),
         backgroundNativeWork: z.literal(false),
@@ -222,6 +265,9 @@ export type WorkflowSummaryView = z.infer<typeof WorkflowSummarySchema>
 export type WorkflowView = z.infer<typeof WorkflowViewSchema>
 export type ValidationView = z.infer<typeof ValidationViewSchema>
 export type StartRunOutput = z.infer<typeof StartRunOutputSchema>
+export type RunGraphOutput = z.infer<typeof RunGraphOutputSchema>
+export type RunGraphNode = z.infer<typeof RunGraphNodeSchema>
+export type RunGraphEdge = z.infer<typeof RunGraphEdgeSchema>
 export type RunDetailView = z.infer<typeof RunDetailSchema>
 export type StepView = z.infer<typeof StepRecordSchema>
 export type RunControlOutput = z.infer<typeof RunControlOutputSchema>

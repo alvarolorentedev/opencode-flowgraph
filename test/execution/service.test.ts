@@ -86,6 +86,12 @@ describe("WorkflowService", () => {
     expect(detail.pendingPermissions).toEqual([])
     expect(detail.resumable).toBe(false)
 
+    const runGraph = await service.getRunGraph(summary.runID)
+    expect(runGraph.nodes.map((node) => node.state)).toEqual(["completed", "completed"])
+    expect(runGraph.activeNode).toBeNull()
+    expect(runGraph.mermaid).toContain("flowchart TD")
+    expect(runGraph.mermaidNodes).toHaveLength(2)
+
     const step = await service.getRunStep(summary.runID, final.steps[0]!.stepID)
     expect(step.result?.outcome).toBe("done")
 

@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -13,5 +15,5 @@
     "noEmit": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "test", "index.ts", "rpc.ts", "vitest.config.ts"]
+  "include": ["src", "test", "index.ts", "rpc.ts", "vitest.config.ts", "vite.gui.config.ts"]
 }

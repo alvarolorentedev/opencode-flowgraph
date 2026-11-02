@@ -21,6 +21,9 @@
 | `execution/tool-hooks.ts` | Workflow-session background-work policy |
 | `execution/prompts.ts` | Bounded context handoff prompts |
 | `execution/results.ts` | Result/audit summarization and usage estimates |
+| `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, controls |
+| `tui.tsx` | TUI session panel, command, keyboard controls |
+| `gui.tsx` | Experimental Desktop GUI panel and Mermaid renderer |
 | `execution/runner.ts` | Explicit run state machine, polling, limits, pause/resume/cancel, recovery |
 | `state/store.ts` | Project-scoped records with revisioned run mutations |
 | `state/concurrency.ts` | Host-local project lock and busy detection |

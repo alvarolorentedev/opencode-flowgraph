@@ -75,6 +75,14 @@ export function createRpcHandlers(service: WorkflowService, capabilities: Capabi
       }
     },
 
+    getRunGraph: async (input: { runID: string }, context: ErrorContext) => {
+      try {
+        return await service.getRunGraph(input.runID)
+      } catch (error) {
+        throw toRpcError(context, error)
+      }
+    },
+
     getRunStep: async (input: { runID: string; stepID: string }, context: ErrorContext) => {
       try {
         return await service.getRunStep(input.runID, input.stepID)

@@ -34,3 +34,6 @@ jobs:
 
       - name: Tests
         run: bun run test
+
+      - name: Build GUI bundle
+        run: bun run build:gui

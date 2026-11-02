@@ -5,6 +5,7 @@ import type { WorkflowDefinition } from "./workflow/schema.js"
 import { WorkflowFileError, WorkflowRepository, parseWorkflowSource } from "./workflow/loader.js"
 import { validateWorkflow, type AgentResolution, type WorkflowValidation } from "./workflow/validator.js"
 import { renderMermaid } from "./workflow/mermaid.js"
+import { buildRunGraph } from "./execution/run-graph.js"
 import { buildGraph, type Diagnostic, type WorkflowGraph } from "./workflow/graph.js"
 import { WorkflowStore, RevisionConflictError } from "./state/store.js"
 import { StorageKeys } from "./state/keys.js"
@@ -385,6 +386,14 @@ export class WorkflowService {
       mermaid: renderMermaid(buildGraph(run.workflowSnapshot)),
       resumable: isResumable(run),
     }
+  }
+
+  async getRunGraph(runID: string): Promise<ReturnType<typeof buildRunGraph>> {
+    const run = await this.requireRun(runID)
+    const pending = run.activeStep
+      ? await this.native.listPermissions(run.activeStep.sessionID).catch(() => run.pendingPermissions)
+      : run.pendingPermissions
+    return buildRunGraph(run, pending)
   }
 
   async getRunStep(runID: string, stepID: string): Promise<StepRecord> {

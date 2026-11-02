@@ -6,12 +6,14 @@ import {
   DeclaredErrorSchema,
   DeleteWorkflowInputSchema,
   DeleteWorkflowOutputSchema,
+  GetRunGraphInputSchema,
   GetWorkflowInputSchema,
   ListRunsInputSchema,
   ListRunsOutputSchema,
   ListWorkflowsOutputSchema,
   ResumeRunInputSchema,
   RunControlOutputSchema,
+  RunGraphOutputSchema,
   RunInputSchema,
   RunStepInputSchema,
   RunUpdatedEventSchema,
@@ -87,6 +89,11 @@ export const AgentWorkflowsRpc = Rpc.define({
     getRun: {
       input: RunInputSchema,
       output: RunDetailSchema,
+      errors,
+    },
+    getRunGraph: {
+      input: GetRunGraphInputSchema,
+      output: RunGraphOutputSchema,
       errors,
     },
     getRunStep: {

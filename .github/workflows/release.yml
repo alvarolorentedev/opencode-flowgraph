@@ -54,6 +54,9 @@ jobs:
       - name: Tests
         run: bun run test
 
+      - name: Build GUI bundle
+        run: bun run build:gui
+
       # No NODE_AUTH_TOKEN. npm exchanges the GitHub OIDC token for a
       # short-lived publish credential using the package's trusted publisher.
       # The version check makes the bootstrap/tag flow idempotent.
