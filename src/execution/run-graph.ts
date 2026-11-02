@@ -90,5 +90,6 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     },
     pendingPermissions,
     blocker: run.blocker === null ? null : { type: run.blocker.type, message: run.blocker.message },
+    failure: run.failure,
   }
 }

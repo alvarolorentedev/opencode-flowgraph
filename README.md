@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-agent-workflows@0.1.5"]
+  "plugins": ["opencode-agent-workflows@0.1.6"]
 }
 ```
 

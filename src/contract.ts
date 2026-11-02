@@ -4,6 +4,7 @@ import type { WorkflowDefinition } from "./workflow/schema.js"
 import type { WorkflowGraph } from "./workflow/graph.js"
 import type { AgentResolution } from "./workflow/validator.js"
 import {
+  FailureInfoSchema,
   PermissionSummarySchema,
   RunDetailSchema,
   RunStatusSchema,
@@ -145,6 +146,7 @@ export const RunGraphOutputSchema = z
       .object({ type: z.string().max(80), message: z.string().max(1_000) })
       .strict()
       .nullable(),
+    failure: FailureInfoSchema.nullable(),
   })
   .strict()
 export const StartRunInputSchema = z

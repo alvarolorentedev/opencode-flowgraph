@@ -136,7 +136,7 @@ describe("mermaid generation", () => {
     expect(first).toContain('n0["Developer"]')
     expect(first).toContain("n0 --> n1")
     expect(first).toContain("n1 -->|approved| complete[\"Complete\"]".replace('[\"Complete\"]', ""))
-    expect(first).toContain("n1 -->|changes_requested| n0")
+    expect(first).toContain("n1 -->|changes requested| n0")
     expect(first).toContain("n1 -->|blocked| pause")
     expect(first).toContain('complete["Complete"]')
     expect(first).toContain('pause["Pause"]')

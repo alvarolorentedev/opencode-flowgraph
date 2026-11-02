@@ -98,7 +98,7 @@ export function renderMermaid(graph: WorkflowGraph): string {
     lines.push(`    ${node.id}["${escapeMermaidText(node.label)}"]`)
   }
   for (const edge of model.edges) {
-    const label = edge.label === undefined ? "" : `|${escapeMermaidText(edge.label)}|`
+    const label = edge.label === undefined ? "" : `|${escapeMermaidText(edge.label.replace(/_/gu, " "))}|`
     lines.push(`    ${edge.from} -->${label} ${edge.to}`)
   }
 

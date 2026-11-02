@@ -7,10 +7,12 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 - The generated Mermaid graph.
 - The active node highlighted.
 - Completed, failed, paused, and pending nodes styled by the graph state.
-- Run status, revision, blocker, and pending permission count.
-- Click a node to open its native session.
-- Buttons for pause, resume, and cancel.
+- Run status, revision, failure reason, blocker, and pending permission count.
+- Click a node to open its native session. A node without a session shows a toast instead.
+- Buttons for pause, resume, cancel, and graph zoom.
 - Live updates from `runUpdated`, with polling as a fallback.
+
+Runs are stored in the plugin storage of the server that started them. Desktop loads GUI parts from its own background server, so the TUI and Desktop must use the same server to see the same runs.
 
 ## Requirements
 

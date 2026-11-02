@@ -6,6 +6,7 @@ import { AgentWorkflowsRpc } from "./rpc.js"
 import type { RunGraphOutput, RunGraphNode, WorkflowSummaryView } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
 import { errorDetail } from "./util/redact.js"
+import { withTimeout } from "./util/timeout.js"
 
 const PANEL = "agent-workflows.graph"
 
@@ -36,24 +37,30 @@ function WorkflowPanel(props: { panel: PanelInput }) {
   const context = usePlugin()
   const [graph, setGraph] = createSignal<RunGraphOutput>()
   const [error, setError] = createSignal<string>()
+  const [loading, setLoading] = createSignal(true)
   const location = () => context.location ?? context.data.location.default()
   const rpc = () => context.client.rpc(AgentWorkflowsRpc)
 
-  const load = async (runID: string) => {
+  const load = async (runID: string): Promise<boolean> => {
     try {
       const result = await rpc().getRunGraph({ runID }, { location: location() })
       setGraph(result)
       setError(undefined)
+      return true
     } catch (cause) {
       setError(errorDetail(cause, "Unable to load the workflow graph"))
+      return false
     }
   }
 
   const resolveRun = async (): Promise<string | undefined> => {
-    const session = context.data.session.get(props.panel.sessionID)
-    const metadata = session?.metadata as Record<string, unknown> | undefined
-    const fromSession = typeof metadata?.runID === "string" ? metadata.runID : undefined
-    if (fromSession) return fromSession
+    try {
+      const session = context.data.session.get(props.panel.sessionID)
+      const metadata = session?.metadata as Record<string, unknown> | undefined
+      if (typeof metadata?.runID === "string") return metadata.runID
+    } catch {
+      // Fall back to the project run list.
+    }
     const runs = await rpc().listRuns({ limit: 50 }, { location: location() })
     return (
       runs.runs.find((run) => run.status === "running" || run.status === "pausing" || run.status === "blocked")?.runID ??
@@ -71,15 +78,22 @@ function WorkflowPanel(props: { panel: PanelInput }) {
     unsubscribe = undefined
     if (timer !== undefined) clearInterval(timer)
     timer = undefined
+    setLoading(true)
+    setError(undefined)
+    setGraph(undefined)
     try {
-      const runID = await resolveRun()
+      const runID = await withTimeout(
+        resolveRun(),
+        10_000,
+        "Workflow RPC timed out while listing runs; is the plugin loaded on this server?",
+      )
       if (current !== generation) return
       if (!runID) {
-        setError("No workflow run found for this project")
+        setError(`No workflow runs visible for ${location().directory}`)
         return
       }
-      await load(runID)
-      if (current !== generation) return
+      const loaded = await withTimeout(load(runID), 10_000, "Workflow RPC timed out while loading the graph")
+      if (current !== generation || !loaded) return
       unsubscribe = rpc().events.on("runUpdated", (event) => {
         if (event.data.runID === runID) void load(runID)
       })
@@ -87,6 +101,8 @@ function WorkflowPanel(props: { panel: PanelInput }) {
     } catch (cause) {
       if (current !== generation) return
       setError(errorDetail(cause, "Unable to load the workflow graph"))
+    } finally {
+      if (current === generation) setLoading(false)
     }
   }
 
@@ -206,7 +222,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
       <Show when={error()}>
         {(message) => <text fg={context.theme.text.feedback.error.base}>{message()}</text>}
       </Show>
-      <Show when={graph()} fallback={<text fg={context.theme.text.muted}>Loading workflow graph…</text>}>
+      <Show when={graph()} fallback={<text fg={context.theme.text.muted}>{loading() ? "Loading workflow graph…" : ""}</text>}>
         {(current) => {
           const value = current()
           const completed = value.nodes.filter((node) => node.state === "completed").length
@@ -220,6 +236,14 @@ function WorkflowPanel(props: { panel: PanelInput }) {
               </text>
               <Show when={value.blocker}>
                 {(blocker) => <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker().message}</text>}
+              </Show>
+              <Show when={value.failure}>
+                {(failure) => (
+                  <text fg={context.theme.text.feedback.error.base}>
+                    Failed: {failure().code} — {failure().message}
+                    {failure().nodeID ? ` (${failure().nodeID})` : ""}
+                  </text>
+                )}
               </Show>
               <Show when={value.pendingPermissions.length > 0}>
                 <text fg={context.theme.text.feedback.warning.base}>

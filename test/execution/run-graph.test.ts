@@ -131,6 +131,7 @@ describe("buildRunGraph", () => {
     })
     const graph = buildRunGraph(run)
     expect(graph.nodes.find((node) => node.nodeID === "reviewer")?.state).toBe("failed")
+    expect(graph.failure).toMatchObject({ code: "native_failure", message: "failed", nodeID: "reviewer" })
     expect(graph.controls.canCancel).toBe(false)
   })
 })
