@@ -5,8 +5,22 @@ The package ships a TUI part. It adds a `Workflow graph` session panel and a `/w
 ## Open it
 
 1. Open a session that belongs to a workflow run, or any session in the project.
-2. Run `/workflow` or use the command palette: **Open workflow graph**.
+2. Run `/workflow` or use the command palette: **Workflow**.
 3. The panel resolves the run from the session metadata, or shows the active/latest run for the project.
+
+## Commands
+
+The `/workflow` slash command accepts arguments:
+
+| Command | Action |
+|---|---|
+| `/workflow` or `/workflow graph` | Open the workflow graph. |
+| `/workflow visuals` | Same as `graph`. |
+| `/workflow list` | List available workflows and start one. |
+| `/workflow run <workflow-id> <objective...>` | Start a run. |
+| `/workflow <workflow-id> <objective...>` | Shorthand for `run`. |
+
+Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the graph panel.
 
 ## What it shows
 

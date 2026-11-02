@@ -3,7 +3,8 @@ import { Show, createEffect, createSignal, on, onCleanup } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
 import { AgentWorkflowsRpc } from "./rpc.js"
-import type { RunGraphOutput, RunGraphNode } from "./contract.js"
+import type { RunGraphOutput, RunGraphNode, WorkflowSummaryView } from "./contract.js"
+import { parseWorkflowCommand } from "./command.js"
 
 const PANEL = "agent-workflows.graph"
 
@@ -257,22 +258,89 @@ function WorkflowPanel(props: { panel: PanelInput }) {
 export default Plugin.define({
   id: "agent-workflows.tui",
   setup(context) {
+    const location = () => context.location ?? context.data.location.default()
+    const rpc = () => context.client.rpc(AgentWorkflowsRpc)
+
+    const toast = (message: string, variant: "info" | "success" | "warning" | "error" = "info") =>
+      context.ui.toast.show({ message, variant })
+
     const open = () => {
       if (!context.ui.panel.open(PANEL)) {
-        context.ui.toast.show({ message: "Open a session before viewing the workflow graph", variant: "warning" })
+        toast("Open a session before viewing the workflow graph", "warning")
       }
     }
+
+    const pickWorkflow = async (): Promise<string | undefined> => {
+      try {
+        const result = await rpc().listWorkflows(undefined, { location: location() })
+        if (result.workflows.length === 0) {
+          toast(`No workflows found in ${result.directory}`, "warning")
+          return undefined
+        }
+        return await context.ui.dialog.select<string>({
+          title: "Start workflow",
+          placeholder: "Search workflows",
+          options: result.workflows.map((workflow: WorkflowSummaryView) => ({
+            title: workflow.id,
+            value: workflow.id,
+            description: workflow.description ?? (workflow.valid ? undefined : workflow.errors[0]?.message),
+            disabled: !workflow.valid,
+          })),
+        })
+      } catch (cause) {
+        toast(cause instanceof Error ? cause.message : "Unable to list workflows", "error")
+        return undefined
+      }
+    }
+
+    const start = async (workflowID: string, objective: string) => {
+      try {
+        const run = await rpc().startRun(
+          { workflowID, objective, requestID: requestID() },
+          { location: location() },
+        )
+        toast(`Started ${workflowID} (${run.runID})`, "success")
+        open()
+      } catch (cause) {
+        toast(cause instanceof Error ? cause.message : "Unable to start workflow", "error")
+      }
+    }
+
+    const runCommand = async (input?: string) => {
+      const command = parseWorkflowCommand(input)
+
+      if (command.type === "graph") {
+        open()
+        return
+      }
+
+      const workflowID = command.type === "run" && command.workflowID ? command.workflowID : await pickWorkflow()
+      if (!workflowID) return
+
+      const objective =
+        command.type === "run" && command.objective
+          ? command.objective
+          : await context.ui.dialog.prompt({
+              title: `Objective for ${workflowID}`,
+              placeholder: "What should the workflow do?",
+            })
+      if (!objective) return
+
+      await start(workflowID, objective)
+    }
+
     context.keymap.layer(() => ({
       mode: "global",
       priority: 10,
       commands: [
         {
           id: "agent-workflows.graph",
-          title: "Open workflow graph",
+          title: "Workflow",
+          description: "Open the graph, list workflows, or start a run",
           group: "Agent Workflows",
           palette: true,
-          slash: { name: "workflow" },
-          run: open,
+          slash: { name: "workflow", arguments: true },
+          run: (input) => void runCommand(input),
         },
       ],
       bindings: ["agent-workflows.graph"],

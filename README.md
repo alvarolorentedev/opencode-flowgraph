@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-agent-workflows@0.1.3"]
+  "plugins": ["opencode-agent-workflows@0.1.4"]
 }
 ```
 
@@ -217,6 +217,7 @@ Storage has no transactions or compare-and-swap. The plugin uses a host-local pr
 The package ships optional UI parts beside the server part:
 
 - `./tui` adds a `Workflow graph` session panel, a `/workflow` command, active-node highlighting, and keyboard controls. See [`docs/tui.md`](docs/tui.md).
+- `/workflow` accepts arguments: `graph`/`visuals` to view, `list` to list workflows, `run <id> <objective...>` to start a run, and `<id> <objective...>` as shorthand.
 - `./gui-experimental` adds an experimental OpenCode Desktop panel that renders the Mermaid graph, highlights the active node, and opens node sessions on click. See [`docs/gui.md`](docs/gui.md).
 
 The TUI renders a structured terminal graph rather than Mermaid. The Desktop GUI renders Mermaid. Neither requires a separate server or web app.

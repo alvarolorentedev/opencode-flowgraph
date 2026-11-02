@@ -30,7 +30,19 @@ This writes `dist/gui-experimental.cjs`. The release workflow and `prepublishOnl
 
 ## Open it
 
-Use the command palette: **Open workflow graph**. Or open the session side panel's **+** menu and choose **Workflow graph**.
+Use the command palette: **Workflow**. Or open the session side panel's **+** menu and choose **Workflow graph**.
+
+The `/workflow` slash command accepts arguments:
+
+| Command | Action |
+|---|---|
+| `/workflow` or `/workflow graph` | Open the workflow graph. |
+| `/workflow visuals` | Same as `graph`. |
+| `/workflow list` | List available workflows and start one. |
+| `/workflow run <workflow-id> <objective...>` | Start a run. |
+| `/workflow <workflow-id> <objective...>` | Shorthand for `run`. |
+
+Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the graph panel.
 
 ## Experimental status
 

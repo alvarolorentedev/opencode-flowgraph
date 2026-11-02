@@ -1,0 +1,36 @@
+version: 1
+name: product-delivery
+description: Product delivery pipeline with PO, design, development, and testing
+
+entry: po
+
+limits:
+  max_steps: 20
+  timeout_seconds: 3600
+  node_timeout_seconds: 900
+  max_result_retries: 2
+  max_recovery_attempts: 3
+  max_repeat_transitions: 6
+
+nodes:
+  po:
+    agent: po
+    next: designer
+
+  designer:
+    agent: designer
+    routes:
+      ready: developer
+      needs_clarification: po
+      blocked: pause
+
+  developer:
+    agent: developer
+    next: tester
+
+  tester:
+    agent: tester
+    routes:
+      passed: complete
+      failed: developer
+      blocked: pause

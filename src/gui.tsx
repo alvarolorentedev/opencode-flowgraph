@@ -3,6 +3,7 @@ import { Command, MenuItem, Panel, Plugin, Style, usePlugin, type PanelTab } fro
 import mermaid from "mermaid"
 import { AgentWorkflowsRpc } from "./rpc.js"
 import type { RunGraphOutput } from "./contract.js"
+import { parseWorkflowCommand } from "./command.js"
 
 const TAB_ID = "graph"
 
@@ -265,14 +266,101 @@ export default Plugin.define({
       if (session) ctx.layout.open(panelKey, session, { tab: "select" })
     }
 
+    const pickWorkflow = async (): Promise<string | undefined> => {
+      const session = ctx.sessions.current()
+      if (!session) {
+        ctx.toast.show({ title: "Workflow", description: "Open a session before starting a workflow.", variant: "default" })
+        return undefined
+      }
+      try {
+        const result = await ctx.client
+          .rpc(AgentWorkflowsRpc)
+          .listWorkflows(undefined, { location: { directory: session.directory } })
+        if (result.workflows.length === 0) {
+          ctx.toast.show({
+            title: "Workflow",
+            description: `No workflows found in ${result.directory}`,
+            variant: "default",
+          })
+          return undefined
+        }
+        return await ctx.dialogs.select<string>({
+          title: "Start workflow",
+          placeholder: "Search workflows",
+          options: result.workflows.map((workflow) => ({
+            title: workflow.id,
+            value: workflow.id,
+            description: workflow.description ?? (workflow.valid ? undefined : workflow.errors[0]?.message),
+          })),
+        })
+      } catch (cause) {
+        ctx.toast.show({
+          title: "Workflow",
+          description: cause instanceof Error ? cause.message : "Unable to list workflows",
+          variant: "error",
+        })
+        return undefined
+      }
+    }
+
+    const start = async (workflowID: string, objective: string) => {
+      const session = ctx.sessions.current()
+      if (!session) {
+        ctx.toast.show({ title: "Workflow", description: "Open a session before starting a workflow.", variant: "default" })
+        return
+      }
+      try {
+        const run = await ctx.client.rpc(AgentWorkflowsRpc).startRun(
+          { workflowID, objective, requestID: requestID() },
+          { location: { directory: session.directory } },
+        )
+        ctx.toast.show({
+          title: "Workflow",
+          description: `Started ${workflowID} (${run.runID})`,
+          variant: "success",
+        })
+        ctx.layout.open(panelKey, session, { tab: "select" })
+      } catch (cause) {
+        ctx.toast.show({
+          title: "Workflow",
+          description: cause instanceof Error ? cause.message : "Unable to start workflow",
+          variant: "error",
+        })
+      }
+    }
+
+    const runCommand = async (input?: string) => {
+      const command = parseWorkflowCommand(input)
+
+      if (command.type === "graph") {
+        open()
+        return
+      }
+
+      const workflowID = command.type === "run" && command.workflowID ? command.workflowID : await pickWorkflow()
+      if (!workflowID) return
+
+      const objective =
+        command.type === "run" && command.objective
+          ? command.objective
+          : await ctx.dialogs.prompt({
+              title: `Objective for ${workflowID}`,
+              placeholder: "What should the workflow do?",
+            })
+      if (!objective) return
+
+      await start(workflowID, objective)
+    }
+
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "base" })
 
-    ctx.add(Command, () => ({
+    ctx.add(Command, (): Command => ({
       id: "graph",
-      title: "Open workflow graph",
+      title: "Workflow",
+      description: "Open the graph, list workflows, or start a run",
       group: "Workflow",
-      slash: { name: "workflow" },
-      run: open,
+      slash: { name: "workflow", arguments: true },
+      run: (input) => void runCommand(input),
     }))
 
     ctx.add(MenuItem, (): MenuItem => ({
