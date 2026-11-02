@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.2.1"]
+  "plugins": ["opencode-flowgraph@0.2.2"]
 }
 ```
 

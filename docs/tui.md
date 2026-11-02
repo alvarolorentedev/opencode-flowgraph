@@ -48,3 +48,5 @@ The panel also receives `runUpdated` events and refreshes periodically as a fall
 The TUI part is exported as `./tui`. OpenCode loads it with the package's server part. For a TUI connected to a remote server, make sure the plugin is available in the TUI's plugin configuration as documented by OpenCode.
 
 If no run appears, the panel shows the project directory and an explicit `No workflow runs visible` message after a short RPC timeout. Runs are stored in the plugin storage of the server that started them; a TUI connected to a different server will not see the Desktop app's runs.
+
+The panel also checks the server plugin version through `capabilities`. If the TUI and server parts differ, it shows a version-mismatch message instead of loading forever. Restart OpenCode after updating the plugin, and make sure the old `opencode-agent-workflows` package is removed from `opencode.json(c)` and `cli.json`.

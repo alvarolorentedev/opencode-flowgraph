@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { Show, createEffect, createSignal, on, onCleanup } from "solid-js"
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
 import { FlowgraphRpc } from "./rpc.js"
@@ -7,6 +7,7 @@ import type { RunGraphOutput, RunGraphNode, WorkflowSummaryView } from "./contra
 import { parseWorkflowCommand } from "./command.js"
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
+import { PLUGIN_VERSION } from "./version.js"
 
 const PANEL = "flowgraph.graph"
 
@@ -38,6 +39,8 @@ function WorkflowPanel(props: { panel: PanelInput }) {
   const [graph, setGraph] = createSignal<RunGraphOutput>()
   const [error, setError] = createSignal<string>()
   const [loading, setLoading] = createSignal(true)
+  const [waitingMs, setWaitingMs] = createSignal(0)
+  const [rpcStatus, setRpcStatus] = createSignal<string>()
   const location = () => context.location ?? context.data.location.default()
   const rpc = () => context.client.rpc(FlowgraphRpc)
 
@@ -71,17 +74,48 @@ function WorkflowPanel(props: { panel: PanelInput }) {
   let generation = 0
   let unsubscribe: (() => void) | undefined
   let timer: ReturnType<typeof setInterval> | undefined
+  let waitTimer: ReturnType<typeof setInterval> | undefined
+  let running = false
+
+  const clearWaitTimer = () => {
+    if (waitTimer !== undefined) clearInterval(waitTimer)
+    waitTimer = undefined
+  }
 
   const start = async () => {
+    if (running) {
+      context.ui.toast.show({ message: "Workflow graph is already loading", variant: "info" })
+      return
+    }
+    running = true
     const current = ++generation
     unsubscribe?.()
     unsubscribe = undefined
     if (timer !== undefined) clearInterval(timer)
     timer = undefined
+    clearWaitTimer()
     setLoading(true)
     setError(undefined)
     setGraph(undefined)
+    setRpcStatus(undefined)
+    setWaitingMs(0)
+    waitTimer = setInterval(() => setWaitingMs((value) => value + 1_000), 1_000)
     try {
+      const capabilities = await withTimeout(
+        rpc().capabilities(undefined, { location: location() }),
+        5_000,
+        "Workflow RPC unavailable on this server; is the flowgraph plugin loaded?",
+      )
+      if (current !== generation) return
+      setRpcStatus(`${capabilities.plugin.name} ${capabilities.plugin.version} · rpc ${capabilities.rpc.id}`)
+      if (capabilities.plugin.version !== PLUGIN_VERSION) {
+        setError(
+          `TUI plugin ${PLUGIN_VERSION} is connected to server plugin ${capabilities.plugin.version}. ` +
+            `Restart OpenCode so both parts load the same version.`,
+        )
+        return
+      }
+
       const runID = await withTimeout(
         resolveRun(),
         10_000,
@@ -102,15 +136,28 @@ function WorkflowPanel(props: { panel: PanelInput }) {
       if (current !== generation) return
       setError(errorDetail(cause, "Unable to load the workflow graph"))
     } finally {
-      if (current === generation) setLoading(false)
+      if (current === generation) {
+        setLoading(false)
+        clearWaitTimer()
+      }
+      running = false
     }
   }
 
-  createEffect(on(() => props.panel.sessionID, () => void start()))
+  let mountedSession = props.panel.sessionID
+  onMount(() => void start())
+  createEffect(() => {
+    const sessionID = props.panel.sessionID
+    if (sessionID === mountedSession) return
+    mountedSession = sessionID
+    void start()
+  })
   onCleanup(() => {
     generation += 1
+    running = false
     unsubscribe?.()
     if (timer !== undefined) clearInterval(timer)
+    clearWaitTimer()
   })
 
   const activeSession = () => {
@@ -187,10 +234,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
     priority: 20,
     enabled: () => context.ui.panel.current()?.name === PANEL,
     commands: [
-      { id: "flowgraph.graph.refresh", title: "Refresh workflow graph", bind: "r", run: () => {
-        const current = graph()
-        if (current) void load(current.runID)
-      } },
+      { id: "flowgraph.graph.refresh", title: "Refresh workflow graph", bind: "r", run: () => void start() },
       { id: "flowgraph.graph.open", title: "Open active workflow session", bind: "enter", run: openActive },
       { id: "flowgraph.graph.toggle", title: "Pause or resume workflow", bind: "p", run: () => {
         const current = graph()
@@ -222,7 +266,15 @@ function WorkflowPanel(props: { panel: PanelInput }) {
       <Show when={error()}>
         {(message) => <text fg={context.theme.text.feedback.error.base}>{message()}</text>}
       </Show>
-      <Show when={graph()} fallback={<text fg={context.theme.text.muted}>{loading() ? "Loading workflow graph…" : ""}</text>}>
+      <Show when={graph()} fallback={
+        <Show when={!error()}>
+          <text fg={context.theme.text.muted}>
+            {loading()
+              ? `Loading workflow graph… ${Math.floor(waitingMs() / 1_000)}s`
+              : "No workflow graph. Press r to retry."}
+          </text>
+        </Show>
+      }>
         {(current) => {
           const value = current()
           const completed = value.nodes.filter((node) => node.state === "completed").length
@@ -234,6 +286,9 @@ function WorkflowPanel(props: { panel: PanelInput }) {
               <text fg={context.theme.text.muted}>
                 Run {value.runID} · revision {value.revision}
               </text>
+              <Show when={rpcStatus()}>
+                {(status) => <text fg={context.theme.text.faint}>{status()}</text>}
+              </Show>
               <Show when={value.blocker}>
                 {(blocker) => <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker().message}</text>}
               </Show>
