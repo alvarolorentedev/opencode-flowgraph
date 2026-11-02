@@ -14,6 +14,12 @@ describe("parseWorkflowCommand", () => {
     expect(parseWorkflowCommand("view")).toEqual({ type: "graph" })
   })
 
+  it("opens the run list", () => {
+    expect(parseWorkflowCommand("runs")).toEqual({ type: "runs" })
+    expect(parseWorkflowCommand("all")).toEqual({ type: "runs" })
+    expect(parseWorkflowCommand("page")).toEqual({ type: "runs" })
+  })
+
   it("lists workflows", () => {
     expect(parseWorkflowCommand("list")).toEqual({ type: "list" })
     expect(parseWorkflowCommand("LIST")).toEqual({ type: "list" })

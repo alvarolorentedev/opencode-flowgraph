@@ -22,8 +22,9 @@
 | `execution/prompts.ts` | Bounded context handoff prompts |
 | `execution/results.ts` | Result/audit summarization and usage estimates |
 | `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, controls |
-| `tui.tsx` | TUI session panel, command, keyboard controls |
-| `gui.tsx` | Experimental Desktop GUI panel and Mermaid renderer |
+| `ui/runs.ts` | Cross-project/worktree run discovery, merge, and ordering |
+| `tui.tsx` | TUI workflow page, session panel, command, keyboard controls |
+| `gui.tsx` | Experimental Desktop GUI run picker, panel, and Mermaid renderer |
 | `execution/runner.ts` | Explicit run state machine, polling, limits, pause/resume/cancel, recovery |
 | `state/store.ts` | Project-scoped records with revisioned run mutations |
 | `state/concurrency.ts` | Host-local project lock and busy detection |

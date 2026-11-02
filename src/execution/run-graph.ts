@@ -74,6 +74,7 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     workflowID: run.workflowID,
     revision: run.revision,
     status: run.status,
+    runSessionID: run.runSessionID,
     activeNode,
     currentNode: run.currentNode,
     nodes,

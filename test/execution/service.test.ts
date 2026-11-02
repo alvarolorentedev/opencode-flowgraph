@@ -97,6 +97,7 @@ describe("WorkflowService", () => {
 
     const runs = await service.listRuns()
     expect(runs.map((run) => run.runID)).toEqual([summary.runID])
+    expect(runs[0]?.runSessionID).toBe(final.runSessionID)
 
     const duplicate = await service.startRun("sample", "implement it", "request-1")
     expect(duplicate.runID).toBe(summary.runID)

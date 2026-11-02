@@ -133,6 +133,7 @@ export const RunGraphOutputSchema = z
     workflowID: WorkflowIdSchema,
     revision: z.number().int().nonnegative(),
     status: RunStatusSchema,
+    runSessionID: z.string().min(1).max(128).nullable(),
     activeNode: z.string().max(64).nullable(),
     currentNode: z.string().max(64).nullable(),
     nodes: z.array(RunGraphNodeSchema).max(200),

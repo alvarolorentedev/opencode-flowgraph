@@ -9,8 +9,14 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 - Completed, failed, paused, and pending nodes styled by the graph state.
 - Run status, revision, failure reason, blocker, and pending permission count.
 - Click a node to open its native session. A node without a session shows a toast instead.
-- Buttons for pause, resume, cancel, and graph zoom.
+- Buttons for changing runs, pause, resume, cancel, and graph zoom.
 - Live updates from `runUpdated`, with polling as a fallback.
+
+## Multiple runs
+
+Each workflow run has its own root session. Opening a run opens that session's tab and adds a graph panel to it, so several runs can stay open as separate graph tabs.
+
+The **Workflow** command opens a run picker containing every run on the current server, across projects and worktrees. The **Runs** button in the graph panel reopens it. An unrelated session never silently shows another run's graph.
 
 Runs are stored in the plugin storage of the server that started them. Desktop loads GUI parts from its own background server, so the TUI and Desktop must use the same server to see the same runs.
 
@@ -32,19 +38,20 @@ This writes `dist/gui-experimental.cjs`. The release workflow and `prepublishOnl
 
 ## Open it
 
-Use the command palette: **Workflow**. Or open the session side panel's **+** menu and choose **Workflow graph**.
+Use the command palette: **Workflow**, or the session side panel's **+** menu and choose **Workflow graph**.
 
 The `/workflow` slash command accepts arguments:
 
 | Command | Action |
 |---|---|
-| `/workflow` or `/workflow graph` | Open the workflow graph. |
+| `/workflow` or `/workflow graph` | Open the current workflow graph, or pick a run. |
 | `/workflow visuals` | Same as `graph`. |
+| `/workflow runs` | Pick a run. |
 | `/workflow list` | List available workflows and start one. |
 | `/workflow run <workflow-id> <objective...>` | Start a run. |
 | `/workflow <workflow-id> <objective...>` | Shorthand for `run`. |
 
-Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the graph panel.
+Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the new run's own session and graph panel.
 
 ## Experimental status
 

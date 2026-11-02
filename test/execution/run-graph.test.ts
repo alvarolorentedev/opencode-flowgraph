@@ -37,6 +37,7 @@ describe("buildRunGraph", () => {
     } as never)
     const graph = buildRunGraph(run)
     expect(RunGraphOutputSchema.safeParse(graph).success).toBe(true)
+    expect(graph.runSessionID).toBe("sess_run_1")
     expect(graph.activeNode).toBe("reviewer")
     expect(graph.nodes.find((node) => node.nodeID === "developer")).toMatchObject({
       state: "completed",

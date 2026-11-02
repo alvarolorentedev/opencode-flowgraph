@@ -1,9 +1,11 @@
 export type WorkflowCommand =
   | { type: "graph" }
+  | { type: "runs" }
   | { type: "list" }
   | { type: "run"; workflowID?: string; objective?: string }
 
 const GRAPH = new Set(["graph", "visual", "visuals", "view"])
+const RUNS = new Set(["runs", "all", "page"])
 const RUN = new Set(["run", "start"])
 const LIST = "list"
 
@@ -15,6 +17,7 @@ export function parseWorkflowCommand(input?: string): WorkflowCommand {
   const keyword = head!.toLowerCase()
 
   if (GRAPH.has(keyword)) return { type: "graph" }
+  if (RUNS.has(keyword)) return { type: "runs" }
   if (keyword === LIST) return { type: "list" }
 
   if (RUN.has(keyword)) {

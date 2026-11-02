@@ -1,9 +1,19 @@
 import { Show, createEffect, createSignal, on, onCleanup } from "solid-js"
-import { Command, MenuItem, Panel, Plugin, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
+import {
+  Command,
+  MenuItem,
+  Panel,
+  Plugin,
+  Style,
+  usePlugin,
+  type MountedSession,
+  type PanelTab,
+} from "@opencode/plugin/gui"
 import mermaid from "mermaid"
 import { FlowgraphRpc } from "./rpc.js"
 import type { RunGraphOutput } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
+import { listLocatedRuns, waitForRunSession, type LocatedRun } from "./ui/runs.js"
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
 
@@ -41,11 +51,20 @@ function requestID(): string {
   return `gui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+function directoryLabel(directory: string): string {
+  return directory.split(/[\\/]/u).filter(Boolean).at(-1) ?? directory
+}
+
+function objectiveLabel(objective: string): string {
+  const line = objective.replace(/\s+/gu, " ").trim()
+  return line.length > 80 ? `${line.slice(0, 77)}…` : line
+}
+
 function nodeSession(graph: RunGraphOutput, nodeID: string): string | undefined {
   return graph.nodes.find((node) => node.nodeID === nodeID)?.sessionIDs.at(-1)
 }
 
-function WorkflowGraphPanel(props: { session: { id: string; directory: string; server: { id: string } } }) {
+function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => void }) {
   const ctx = usePlugin()
   const [graph, setGraph] = createSignal<RunGraphOutput>()
   const [error, setError] = createSignal<string>()
@@ -55,7 +74,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
   let renderSequence = 0
 
   const location = () => ({ directory: props.session.directory })
-  const rpc = () => ctx.client.rpc(FlowgraphRpc)
+  const rpc = () => props.session.server.client.rpc(FlowgraphRpc)
 
   const load = async (runID: string): Promise<boolean> => {
     try {
@@ -71,17 +90,13 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
 
   const resolveRun = async (): Promise<string | undefined> => {
     try {
-      const session = await ctx.client.session.get({ sessionID: props.session.id })
+      const session = await props.session.server.client.session.get({ sessionID: props.session.id })
       const metadata = session.metadata as Record<string, unknown> | undefined
       if (typeof metadata?.runID === "string") return metadata.runID
     } catch {
-      // Fall back to the project run list.
+      // The panel only follows workflow sessions; use the run picker otherwise.
     }
-    const runs = await rpc().listRuns({ limit: 50 }, { location: location() })
-    return (
-      runs.runs.find((run) => run.status === "running" || run.status === "pausing" || run.status === "blocked")?.runID ??
-      runs.runs[0]?.runID
-    )
+    return undefined
   }
 
   const render = async (value: RunGraphOutput) => {
@@ -151,11 +166,11 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
       const runID = await withTimeout(
         resolveRun(),
         10_000,
-        "Workflow RPC timed out while listing runs; is the plugin loaded on this server?",
+        "Workflow RPC timed out while resolving the run; is the plugin loaded on this server?",
       )
       if (current !== generation) return
       if (!runID) {
-        setError(`No workflow runs visible for ${location().directory}`)
+        setError("This session is not a workflow run. Use Runs to choose one.")
         return
       }
       const loaded = await withTimeout(load(runID), 10_000, "Workflow RPC timed out while loading the graph")
@@ -252,7 +267,18 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
       <Show when={error()}>
         {(message) => <div class="awf-graph-error">{message()}</div>}
       </Show>
-      <Show when={graph()} fallback={<div class="awf-graph-muted">{loading() ? "Loading workflow graph…" : ""}</div>}>
+      <Show
+        when={graph()}
+        fallback={
+          <div class="awf-graph-muted">
+            {loading() ? "Loading workflow graph…" : ""}
+            {!loading() && !error() ? "No workflow run selected." : ""}
+            <div class="awf-graph-actions">
+              <button onClick={props.onPickRun}>Runs</button>
+            </div>
+          </div>
+        }
+      >
         {(current) => {
           const value = current()
           return (
@@ -283,6 +309,7 @@ function WorkflowGraphPanel(props: { session: { id: string; directory: string; s
                 </Show>
               </div>
               <div class="awf-graph-actions">
+                <button onClick={props.onPickRun}>Runs</button>
                 <button onClick={openActive} disabled={!activeSession()}>Open active session</button>
                 <button onClick={pause} disabled={!value.controls.canPause}>Pause</button>
                 <button onClick={resume} disabled={!value.controls.canResume}>Resume</button>
@@ -314,27 +341,103 @@ const graphTab: PanelTab = {
 export default Plugin.define({
   setup(ctx) {
     const panelKey = `${ctx.id}:${TAB_ID}`
+    const [pendingRunSession, setPendingRunSession] = createSignal<{ server: string; sessionID: string }>()
+
+    const toast = (description: string, variant: "default" | "success" | "error" = "default") =>
+      ctx.toast.show({ title: "Workflow", description, variant })
+
+    const currentServer = () => {
+      const session = ctx.sessions.current()
+      if (session) return session.server
+      const servers = ctx.servers.list().map((id) => ctx.servers.get(id))
+      return servers.find((server) => server?.builtin) ?? servers.find(Boolean)
+    }
+
+    const openRun = (server: string, runSessionID: string) => {
+      setPendingRunSession({ server, sessionID: runSessionID })
+      ctx.tabs.open({ server, id: runSessionID }, { focus: true })
+    }
+
+    createEffect(() => {
+      const target = pendingRunSession()
+      if (!target) return
+      const session = ctx.sessions
+        .list()
+        .find((item) => item.id === target.sessionID && item.server.id === target.server)
+      if (!session) return
+      ctx.layout.open(panelKey, session, { tab: "select" })
+      setPendingRunSession(undefined)
+    })
+
+    const pickRun = async () => {
+      const server = currentServer()
+      if (!server) {
+        toast("No server is reachable.", "error")
+        return
+      }
+      const directory = ctx.sessions.current()?.directory
+      const rpc = server.client.rpc(FlowgraphRpc)
+      try {
+        const result = await listLocatedRuns({ client: server.client, rpc, currentDirectory: directory })
+        if (result.runs.length === 0) {
+          toast("No workflow runs visible for this server.")
+          return
+        }
+        const selected = await ctx.dialogs.select<LocatedRun>({
+          title: "Open workflow run",
+          placeholder: "Search runs",
+          options: result.runs.map((item) => ({
+            title: `${item.run.workflowID} · ${item.run.status}`,
+            value: item,
+            description: `${directoryLabel(item.directory)} · ${objectiveLabel(item.run.objective)}`,
+          })),
+        })
+        if (!selected) return
+        const runSessionID =
+          selected.run.runSessionID ??
+          (await waitForRunSession(rpc, selected.directory, selected.run.runID))
+        if (!runSessionID) {
+          toast("The workflow run has no session yet.", "error")
+          return
+        }
+        openRun(server.id, runSessionID)
+      } catch (cause) {
+        toast(errorDetail(cause, "Unable to list workflow runs"), "error")
+      }
+    }
+
     const open = () => {
       const session = ctx.sessions.current()
-      if (session) ctx.layout.open(panelKey, session, { tab: "select" })
+      if (!session) {
+        void pickRun()
+        return
+      }
+      void (async () => {
+        let runID: string | undefined
+        try {
+          const info = await session.server.client.session.get({ sessionID: session.id })
+          const metadata = info.metadata as Record<string, unknown> | undefined
+          if (typeof metadata?.runID === "string") runID = metadata.runID
+        } catch {
+          // Not a workflow session; offer the run picker.
+        }
+        if (runID) ctx.layout.open(panelKey, session, { tab: "select" })
+        else void pickRun()
+      })()
     }
 
     const pickWorkflow = async (): Promise<string | undefined> => {
       const session = ctx.sessions.current()
       if (!session) {
-        ctx.toast.show({ title: "Workflow", description: "Open a session before starting a workflow.", variant: "default" })
+        toast("Open a session before starting a workflow.")
         return undefined
       }
       try {
-        const result = await ctx.client
+        const result = await session.server.client
           .rpc(FlowgraphRpc)
           .listWorkflows(undefined, { location: { directory: session.directory } })
         if (result.workflows.length === 0) {
-          ctx.toast.show({
-            title: "Workflow",
-            description: `No workflows found in ${result.directory}`,
-            variant: "default",
-          })
+          toast(`No workflows found in ${result.directory}`)
           return undefined
         }
         return await ctx.dialogs.select<string>({
@@ -347,11 +450,7 @@ export default Plugin.define({
           })),
         })
       } catch (cause) {
-        ctx.toast.show({
-          title: "Workflow",
-          description: errorDetail(cause, "Unable to list workflows"),
-          variant: "error",
-        })
+        toast(errorDetail(cause, "Unable to list workflows"), "error")
         return undefined
       }
     }
@@ -359,26 +458,21 @@ export default Plugin.define({
     const start = async (workflowID: string, objective: string) => {
       const session = ctx.sessions.current()
       if (!session) {
-        ctx.toast.show({ title: "Workflow", description: "Open a session before starting a workflow.", variant: "default" })
+        toast("Open a session before starting a workflow.")
         return
       }
+      const rpc = session.server.client.rpc(FlowgraphRpc)
       try {
-        const run = await ctx.client.rpc(FlowgraphRpc).startRun(
+        const run = await rpc.startRun(
           { workflowID, objective, requestID: requestID() },
           { location: { directory: session.directory } },
         )
-        ctx.toast.show({
-          title: "Workflow",
-          description: `Started ${workflowID} (${run.runID})`,
-          variant: "success",
-        })
-        ctx.layout.open(panelKey, session, { tab: "select" })
+        toast(`Started ${workflowID} (${run.runID})`, "success")
+        const runSessionID = await waitForRunSession(rpc, session.directory, run.runID)
+        if (runSessionID) openRun(session.server.id, runSessionID)
+        else toast("Workflow started, but its session is not ready yet.")
       } catch (cause) {
-        ctx.toast.show({
-          title: "Workflow",
-          description: errorDetail(cause, "Unable to start workflow"),
-          variant: "error",
-        })
+        toast(errorDetail(cause, "Unable to start workflow"), "error")
       }
     }
 
@@ -387,6 +481,10 @@ export default Plugin.define({
 
       if (command.type === "graph") {
         open()
+        return
+      }
+      if (command.type === "runs") {
+        await pickRun()
         return
       }
 
@@ -452,7 +550,7 @@ export default Plugin.define({
       region: "side",
       mobile: { title: "Workflow", order: 50, kind: "menu" },
       list: (input) => (input.open.includes(TAB_ID) ? [graphTab] : []),
-      render: (props) => <WorkflowGraphPanel session={props.session} />,
+      render: (props) => <WorkflowGraphPanel session={props.session} onPickRun={() => void pickRun()} />,
     })
   },
 })

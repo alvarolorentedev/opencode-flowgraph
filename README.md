@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.2.2"]
+  "plugins": ["opencode-flowgraph@0.3.0"]
 }
 ```
 
@@ -176,7 +176,7 @@ The shared contract is exported from `opencode-flowgraph/rpc`.
 | `startRun` | Start a run with an objective and idempotency key |
 | `listRuns` | List project runs |
 | `getRun` | Current state, step summaries, Mermaid, live permissions |
-| `getRunGraph` | Structured graph, active node, node sessions, Mermaid mapping, controls |
+| `getRunGraph` | Structured graph, run and run-session IDs, active node, node sessions, Mermaid mapping, controls |
 | `getRunStep` | Full persisted step result |
 | `pauseRun` | Safe pause between nodes |
 | `resumeRun` | Resume, with explicit confirmation for ambiguous retries |
@@ -201,7 +201,8 @@ All methods are location-scoped. The plugin rejects runs that belong to another 
 ## Execution and recovery
 
 - MVP execution is sequential: one node session at a time.
-- One active workflow per canonical project tree.
+- One active workflow per canonical project tree. Separate canonical trees can run concurrently.
+- The TUI page and Desktop run picker list runs from every project and worktree on the connected server.
 - Each node runs in a fresh native child session of a stable workflow-run session.
 - Run and step records are stored in OpenCode plugin storage, keyed by project.
 - Completed nodes are never rerun merely because the server restarted.
@@ -231,9 +232,10 @@ Storage has no transactions or compare-and-swap. The plugin uses a host-local pr
 
 The package ships optional UI parts beside the server part:
 
-- `./tui` adds a `Workflow graph` session panel, a `/workflow` command, active-node highlighting, and keyboard controls. See [`docs/tui.md`](docs/tui.md).
-- `/workflow` accepts arguments: `graph`/`visuals` to view, `list` to list workflows, `run <id> <objective...>` to start a run, and `<id> <objective...>` as shorthand.
-- `./gui-experimental` adds an experimental OpenCode Desktop panel that renders the Mermaid graph, highlights the active node, and opens node sessions on click. See [`docs/gui.md`](docs/gui.md).
+- `./tui` adds a full-screen `Workflow` page, a `Workflow graph` session panel, a `/workflow` command, active-node highlighting, and keyboard controls. See [`docs/tui.md`](docs/tui.md).
+- The TUI page needs no session open. It lists every run visible on the connected server, including runs in other projects and worktrees.
+- `/workflow` accepts arguments: `graph`/`visuals` to view, `runs` to pick a run, `list` to list workflows, `run <id> <objective...>` to start a run, and `<id> <objective...>` as shorthand.
+- `./gui-experimental` adds an experimental OpenCode Desktop panel that renders the Mermaid graph, highlights the active node, and opens node sessions on click. Use the `Workflow` command to pick a run from any project or worktree; each run opens in its own session tab with its own graph. See [`docs/gui.md`](docs/gui.md).
 
 The TUI renders a structured terminal graph rather than Mermaid. The Desktop GUI renders Mermaid. Neither requires a separate server or web app.
 
