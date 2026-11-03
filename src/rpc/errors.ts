@@ -32,7 +32,7 @@ export function toRpcError(context: ErrorContext, error: unknown): unknown {
     return context.error("invalid_workflow", error.message, { diagnostics: error.diagnostics })
   }
   if (error instanceof StaleWorkflowError) {
-    return context.error("stale_revision", error.message)
+    return context.error("stale_revision", error.message, { message: error.message })
   }
   if (error instanceof WorkflowFileError) {
     const type =
@@ -45,31 +45,42 @@ export function toRpcError(context: ErrorContext, error: unknown): unknown {
             : error.code === "invalid_workflow" || error.code === "invalid_workflow_id"
               ? "invalid_workflow"
               : "invalid_state"
-    return context.error(type, error.message, error.diagnostics.length === 0 ? undefined : { diagnostics: error.diagnostics })
+    return context.error(type, error.message, {
+      message: error.message,
+      ...(error.diagnostics.length === 0 ? {} : { diagnostics: error.diagnostics }),
+    })
   }
   if (error instanceof RevisionConflictError) {
-    return context.error("stale_revision", error.message, { currentRevision: error.currentRevision })
+    return context.error("stale_revision", error.message, {
+      message: error.message,
+      currentRevision: error.currentRevision,
+    })
   }
   if (error instanceof ProjectBusyError) {
-    return context.error("project_busy", error.message)
+    return context.error("project_busy", error.message, { message: error.message })
   }
   if (error instanceof IdempotencyConflictError) {
-    return context.error("idempotency_conflict", error.message)
+    return context.error("idempotency_conflict", error.message, { message: error.message })
   }
   if (error instanceof TooManyRunsError) {
-    return context.error("too_many_runs", error.message)
+    return context.error("too_many_runs", error.message, { message: error.message })
   }
   if (error instanceof PermissionPendingError) {
-    return context.error("permission_pending", error.message, { permissions: error.permissions })
+    return context.error("permission_pending", error.message, {
+      message: error.message,
+      permissions: error.permissions,
+    })
   }
   if (error instanceof AmbiguousResumeError) {
-    return context.error("ambiguous_requires_confirmation", error.message)
+    return context.error("ambiguous_requires_confirmation", error.message, { message: error.message })
   }
   if (error instanceof NotResumableError) {
-    return context.error("not_resumable", error.message)
+    return context.error("not_resumable", error.message, { message: error.message })
   }
   if (error instanceof InvalidStateError || error instanceof StateCorruptionError) {
-    return context.error("invalid_state", error.message)
+    return context.error("invalid_state", error.message, { message: error.message })
   }
-  return context.error("unavailable", errorMessage(error, "workflow operation failed"))
+  return context.error("unavailable", errorMessage(error, "workflow operation failed"), {
+    message: errorMessage(error, "workflow operation failed"),
+  })
 }

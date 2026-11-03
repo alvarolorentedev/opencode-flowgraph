@@ -104,6 +104,7 @@ export class WorkflowRunner {
   private readonly options: RunnerOptions
   private readonly active = new Map<string, ActiveRun>()
   private readonly heldLocks = new Map<string, ProjectLock>()
+  private readonly blockedWatchers = new Set<string>()
   private readonly controlMutex = new KeyedMutex()
   private shuttingDown = false
 
@@ -1163,6 +1164,7 @@ export class WorkflowRunner {
       if (run.status === "blocked") {
         try {
           await this.acquire(projectID, run)
+          void this.watchBlocked(projectID, run.runID)
         } catch (error) {
           if (!(error instanceof ProjectBusyError)) throw error
         }
@@ -1174,6 +1176,24 @@ export class WorkflowRunner {
       } catch (error) {
         if (!(error instanceof ProjectBusyError)) throw error
       }
+    }
+  }
+
+  private async watchBlocked(projectID: string, runID: string): Promise<void> {
+    if (this.blockedWatchers.has(runID)) return
+    this.blockedWatchers.add(runID)
+    try {
+      while (!this.shuttingDown) {
+        const run = await this.store.getRun(projectID, runID).catch(() => undefined)
+        if (!run || TERMINAL.has(run.status)) {
+          await this.release(projectID, runID)
+          return
+        }
+        if (run.status !== "blocked" || this.active.has(runID)) return
+        await this.sleep(1_000)
+      }
+    } finally {
+      this.blockedWatchers.delete(runID)
     }
   }
 

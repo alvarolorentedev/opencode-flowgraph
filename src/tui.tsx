@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js"
+import { onCleanup, onMount } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
 import type { RpcClient } from "@opencode/client/promise"
@@ -80,9 +80,30 @@ function WorkflowGraph(props: {
   onRefresh?: () => void
 }) {
   const context = usePlugin()
-  const [graph, setGraph] = createSignal<RunGraphOutput>()
-  const [error, setError] = createSignal<string>()
-  const [loading, setLoading] = createSignal(true)
+  const [state, update] = context.storage.memory(`flowgraph.graph.${props.id}`, {
+    initial: {
+      graph: null as RunGraphOutput | null,
+      sourceKey: null as string | null,
+      error: null as string | null,
+      loading: true,
+    },
+  })
+  const graph = () => state.graph
+  const error = () => state.error
+  const loading = () => state.loading
+  const rerender = () => context.renderer.requestRender()
+  const setGraph = (value: RunGraphOutput | null) => {
+    update((draft) => void (draft.graph = value))
+    rerender()
+  }
+  const setError = (value: string | null) => {
+    update((draft) => void (draft.error = value))
+    rerender()
+  }
+  const setLoading = (value: boolean) => {
+    update((draft) => void (draft.loading = value))
+    rerender()
+  }
 
   let generation = 0
   let unsubscribe: (() => void) | undefined
@@ -96,8 +117,22 @@ function WorkflowGraph(props: {
         "Workflow RPC timed out while loading the graph",
       )
       if (current !== generation) return false
-      setGraph(result)
-      setError(undefined)
+      const key = `${source.directory}\u0000${source.runID}`
+      const previous = state.graph
+      update((draft) => {
+        draft.graph = result
+        draft.sourceKey = key
+        draft.error = null
+      })
+      rerender()
+      // The npm-installed TUI does not repaint plugin-owned signal updates; remount the panel so the host renders the stored snapshot.
+      if (
+        props.id === "panel" &&
+        (!previous || previous.revision !== result.revision || previous.status !== result.status)
+      ) {
+        context.ui.panel.close()
+        setTimeout(() => context.ui.panel.open(PANEL), 20)
+      }
       return true
     } catch (cause) {
       if (current !== generation) return false
@@ -106,14 +141,24 @@ function WorkflowGraph(props: {
     }
   }
 
+  let startedKey: string | undefined
+
+  const refreshSource = () => {
+    const source = props.source()
+    const key = source ? `${source.directory}\u0000${source.runID}` : ""
+    if (key === startedKey) return
+    startedKey = key
+    void start(source)
+  }
+
   const start = async (source: GraphSource | undefined) => {
     const current = ++generation
     unsubscribe?.()
     unsubscribe = undefined
     if (timer !== undefined) clearInterval(timer)
     timer = undefined
-    setGraph(undefined)
-    setError(undefined)
+    setGraph(null)
+    setError(null)
     setLoading(source !== undefined)
     if (!source) return
 
@@ -145,15 +190,22 @@ function WorkflowGraph(props: {
     }
   }
 
-  createEffect(
-    on(
-      () => {
-        const source = props.source()
-        return source ? `${source.directory}\u0000${source.runID}` : ""
-      },
-      () => void start(props.source()),
-    ),
-  )
+  onMount(() => {
+    const source = props.source()
+    const key = source ? `${source.directory}\u0000${source.runID}` : ""
+    if (source && state.graph && state.sourceKey === key) {
+      startedKey = key
+      const current = ++generation
+      unsubscribe = source.rpc.events.on("runUpdated", (event) => {
+        if (event.data.runID === source.runID) void load(source, current)
+      })
+      timer = setInterval(() => void load(source, current), 3_000)
+      return
+    }
+    refreshSource()
+    const poll = setInterval(refreshSource, 1_000)
+    onCleanup(() => clearInterval(poll))
+  })
 
   onCleanup(() => {
     generation += 1
@@ -288,74 +340,71 @@ function WorkflowGraph(props: {
     }
   }
 
-  return (
-    <box flexDirection="column">
-      <Show when={error()}>
-        {(message) => <text fg={context.theme.text.feedback.error.base}>{message()}</text>}
-      </Show>
-      <Show
-        when={graph()}
-        fallback={
-          <Show when={!error()}>
-            <text fg={context.theme.text.muted}>
-              {loading() ? "Loading workflow graph…" : "No workflow run selected."}
-            </text>
-          </Show>
-        }
-      >
-        {(current) => {
-          const value = current()
-          const completed = value.nodes.filter((node) => node.state === "completed").length
+  const renderGraph = (value: RunGraphOutput) => {
+    const completed = value.nodes.filter((node) => node.state === "completed").length
+    const blocker = value.blocker
+    const failure = value.failure
+    return (
+      <box flexDirection="column">
+        <text fg={context.theme.text.base}>
+          Workflow {value.workflowID} · {value.status} · {completed}/{value.nodes.length} nodes
+        </text>
+        <text fg={context.theme.text.muted}>
+          Run {value.runID} · revision {value.revision}
+        </text>
+        {blocker ? (
+          <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker.message}</text>
+        ) : null}
+        {failure ? (
+          <text fg={context.theme.text.feedback.error.base}>
+            Failed: {failure.code} — {failure.message}
+            {failure.nodeID ? ` (${failure.nodeID})` : ""}
+          </text>
+        ) : null}
+        {value.pendingPermissions.length > 0 ? (
+          <text fg={context.theme.text.feedback.warning.base}>
+            Waiting for {value.pendingPermissions.length} native permission request(s)
+          </text>
+        ) : null}
+        <text> </text>
+        {value.nodes.map((node) => {
+          const edges = value.edges.filter((edge) => edge.from === node.nodeID)
           return (
             <box flexDirection="column">
-              <text fg={context.theme.text.base}>
-                Workflow {value.workflowID} · {value.status} · {completed}/{value.nodes.length} nodes
+              <text fg={color(node)}>
+                {nodeMarker(node)} {node.label} ({node.agent}) · {node.stepCount} step(s)
+                {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
               </text>
-              <text fg={context.theme.text.muted}>
-                Run {value.runID} · revision {value.revision}
-              </text>
-              <Show when={value.blocker}>
-                {(blocker) => <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker().message}</text>}
-              </Show>
-              <Show when={value.failure}>
-                {(failure) => (
-                  <text fg={context.theme.text.feedback.error.base}>
-                    Failed: {failure().code} — {failure().message}
-                    {failure().nodeID ? ` (${failure().nodeID})` : ""}
-                  </text>
-                )}
-              </Show>
-              <Show when={value.pendingPermissions.length > 0}>
-                <text fg={context.theme.text.feedback.warning.base}>
-                  Waiting for {value.pendingPermissions.length} native permission request(s)
+              {edges.map((edge) => (
+                <text fg={context.theme.text.muted}>
+                  {"    "}
+                  {edge.outcome === undefined ? "→" : `${edge.outcome} →`} {terminalLabel(edge.to)}
                 </text>
-              </Show>
-              <text> </text>
-              {value.nodes.map((node) => {
-                const edges = value.edges.filter((edge) => edge.from === node.nodeID)
-                return (
-                  <box flexDirection="column">
-                    <text fg={color(node)}>
-                      {nodeMarker(node)} {node.label} ({node.agent}) · {node.stepCount} step(s)
-                      {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
-                    </text>
-                    {edges.map((edge) => (
-                      <text fg={context.theme.text.muted}>
-                        {"    "}
-                        {edge.outcome === undefined ? "→" : `${edge.outcome} →`} {terminalLabel(edge.to)}
-                      </text>
-                    ))}
-                  </box>
-                )
-              })}
-              <text> </text>
-              <text fg={context.theme.text.faint}>
-                enter open active session · p pause/resume · c cancel · r refresh
-              </text>
+              ))}
             </box>
           )
-        }}
-      </Show>
+        })}
+        <text> </text>
+        <text fg={context.theme.text.faint}>
+          enter open active session · p pause/resume · c cancel · r refresh
+        </text>
+      </box>
+    )
+  }
+
+  const currentError = error()
+  const currentGraph = graph()
+
+  return (
+    <box flexDirection="column">
+      {currentError ? <text fg={context.theme.text.feedback.error.base}>{currentError}</text> : null}
+      {currentGraph ? (
+        renderGraph(currentGraph)
+      ) : loading() ? (
+        <text fg={context.theme.text.muted}>Loading workflow graph…</text>
+      ) : (
+        <text fg={context.theme.text.muted}>No workflow run selected.</text>
+      )}
     </box>
   )
 }
@@ -385,16 +434,15 @@ function WorkflowPanel(props: { panel: PanelInput }) {
 
   return (
     <box flexDirection="column" padding={1}>
-      <Show
-        when={source()}
-        fallback={<text fg={context.theme.text.muted}>This session is not a workflow run. Run /flowgraph to choose one.</text>}
-      >
+      {source() ? (
         <WorkflowGraph
           id="panel"
           source={source}
           active={() => context.ui.panel.current()?.name === PANEL}
         />
-      </Show>
+      ) : (
+        <text fg={context.theme.text.muted}>This session is not a workflow run. Run /flowgraph to choose one.</text>
+      )}
     </box>
   )
 }
@@ -403,11 +451,20 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
   const context = usePlugin()
   const location = () => context.location ?? context.data.location.default()
   const rpc = () => context.client.rpc(FlowgraphRpc)
-  const [runs, setRuns] = createSignal<LocatedRun[]>([])
-  const [selected, setSelected] = createSignal<LocatedRun>()
-  const [error, setError] = createSignal<string>()
-  const [loading, setLoading] = createSignal(true)
-  const [unavailable, setUnavailable] = createSignal(0)
+  const [page, updatePage] = context.storage.memory("flowgraph.page", {
+    initial: {
+      runs: [] as LocatedRun[],
+      selected: null as LocatedRun | null,
+      error: null as string | null,
+      loading: true,
+      unavailable: 0,
+    },
+  })
+  const runs = () => page.runs
+  const selected = () => page.selected ?? undefined
+  const error = () => page.error
+  const loading = () => page.loading
+  const unavailable = () => page.unavailable
 
   const initialRunID = () => (typeof props.data?.runID === "string" ? props.data.runID : undefined)
   const initialDirectory = () =>
@@ -421,9 +478,11 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
         rpc: rpc(),
         currentDirectory: location().directory,
       })
-      setRuns(result.runs)
-      setUnavailable(result.unavailable.length)
-      setError(undefined)
+      updatePage((draft) => {
+        draft.runs = result.runs
+        draft.unavailable = result.unavailable.length
+        draft.error = null
+      })
       const wantedID = initialRunID()
       const wantedDirectory = initialDirectory()
       const wanted =
@@ -447,11 +506,17 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
               (item) => item.run.runID === wantedID && (!wantedDirectory || item.directory === wantedDirectory),
             )
           : undefined)
-      setSelected(match ?? result.runs[0])
+      updatePage((draft) => {
+        draft.selected = match ?? result.runs[0] ?? null
+      })
     } catch (cause) {
-      setError(errorDetail(cause, "Unable to list workflow runs"))
+      updatePage((draft) => {
+        draft.error = errorDetail(cause, "Unable to list workflow runs")
+      })
     } finally {
-      setLoading(false)
+      updatePage((draft) => {
+        draft.loading = false
+      })
     }
   }
 
@@ -463,7 +528,9 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
       ? list.findIndex((item) => item.run.runID === current.run.runID && item.directory === current.directory)
       : -1
     const next = index === -1 ? 0 : (index + delta + list.length) % list.length
-    setSelected(list[next])
+    updatePage((draft) => {
+      draft.selected = list[next] ?? null
+    })
   }
 
   const openSelected = () => {
@@ -519,18 +586,18 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
     return current ? { rpc: rpc(), directory: current.directory, runID: current.run.runID } : undefined
   }
 
+  const currentError = error()
+
   return (
     <box flexDirection="column" padding={1}>
       <text fg={context.theme.text.base}>
         Workflow runs · {runs().length}
         {unavailable() > 0 ? ` · ${unavailable()} location(s) unavailable` : ""}
       </text>
-      <Show when={error()}>
-        {(message) => <text fg={context.theme.text.feedback.error.base}>{message()}</text>}
-      </Show>
-      <Show when={!loading() && runs().length === 0 && !error()}>
+      {currentError ? <text fg={context.theme.text.feedback.error.base}>{currentError}</text> : null}
+      {!loading() && runs().length === 0 && !currentError ? (
         <text fg={context.theme.text.muted}>No workflow runs visible for this server.</text>
-      </Show>
+      ) : null}
       {runs().map((item) => {
         const current = selected()
         const active = current?.run.runID === item.run.runID && current.directory === item.directory
@@ -705,11 +772,7 @@ export default Plugin.define({
     })
     context.ui.slot({
       append: "session.panel",
-      render: (panel) => (
-        <Show when={panel.name === PANEL}>
-          <WorkflowPanel panel={panel} />
-        </Show>
-      ),
+      render: (panel) => (panel.name === PANEL ? <WorkflowPanel panel={panel} /> : null),
     })
     return () => unregisterPage()
   },

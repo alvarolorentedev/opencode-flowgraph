@@ -49,7 +49,7 @@ describe("flowgraph RPC contract", () => {
   it("validates the capabilities and runUpdated payloads", () => {
     expect(
       CapabilitiesOutputSchema.safeParse({
-        plugin: { name: "@alvarolorentedev/opencode-flowgraph", version: "0.4.0" },
+        plugin: { name: "@alvarolorentedev/opencode-flowgraph", version: "0.5.1" },
         rpc: { id: "flowgraph", version: 1 },
         workflowSchemaVersion: 1,
         openCodeVersion: "2.0.32",
