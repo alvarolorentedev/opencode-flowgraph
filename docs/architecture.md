@@ -23,6 +23,7 @@
 | `execution/results.ts` | Result/audit summarization and usage estimates |
 | `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, controls |
 | `ui/runs.ts` | Cross-project/worktree run discovery, merge, and ordering |
+| `ui/graph.ts` | Pure boxed terminal diagram: ranking, rails, tones, width/height fallback |
 | `tui.tsx` | TUI workflow page, session panel, command, keyboard controls |
 | `gui.tsx` | Experimental Desktop GUI run picker, panel, and Mermaid renderer |
 | `execution/runner.ts` | Explicit run state machine, polling, limits, pause/resume/cancel, recovery |

@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { onCleanup, onMount } from "solid-js"
+import { createSignal, onCleanup, onMount } from "solid-js"
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
 import type { RpcClient } from "@opencode/client/promise"
@@ -11,6 +11,7 @@ import { listLocatedRuns, waitForRunSession, type LocatedRun } from "./ui/runs.j
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
 import { PLUGIN_VERSION } from "./version.js"
+import { renderRunGraphDiagram, type GraphTone } from "./ui/graph.js"
 
 const PANEL = "flowgraph.graph"
 const PAGE = "workflow"
@@ -78,8 +79,11 @@ function WorkflowGraph(props: {
   source: () => GraphSource | undefined
   active?: () => boolean
   onRefresh?: () => void
+  width: () => number
+  maxLines: () => number
 }) {
   const context = usePlugin()
+  const [pulse, setPulse] = createSignal(false)
   const [state, update] = context.storage.memory(`flowgraph.graph.${props.id}`, {
     initial: {
       graph: null as RunGraphOutput | null,
@@ -128,7 +132,10 @@ function WorkflowGraph(props: {
       // The npm-installed TUI does not repaint plugin-owned signal updates; remount the panel so the host renders the stored snapshot.
       if (
         props.id === "panel" &&
-        (!previous || previous.revision !== result.revision || previous.status !== result.status)
+        (!previous ||
+          previous.revision !== result.revision ||
+          previous.status !== result.status ||
+          previous.activeNode !== result.activeNode)
       ) {
         context.ui.panel.close()
         setTimeout(() => context.ui.panel.open(PANEL), 20)
@@ -205,6 +212,15 @@ function WorkflowGraph(props: {
     refreshSource()
     const poll = setInterval(refreshSource, 1_000)
     onCleanup(() => clearInterval(poll))
+  })
+
+  onMount(() => {
+    const pulseTimer = setInterval(() => {
+      if (!state.graph?.activeNode || !(props.active?.() ?? true)) return
+      setPulse((value) => !value)
+      context.renderer.requestRender()
+    }, 800)
+    onCleanup(() => clearInterval(pulseTimer))
   })
 
   onCleanup(() => {
@@ -340,10 +356,67 @@ function WorkflowGraph(props: {
     }
   }
 
+  const toneColor = (tone: GraphTone | undefined) => {
+    switch (tone) {
+      case "active":
+        return pulse()
+          ? context.theme.text.feedback.success.muted
+          : context.theme.text.feedback.success.base
+      case "completed":
+        return context.theme.text.muted
+      case "failed":
+        return context.theme.text.feedback.error.base
+      case "paused":
+        return context.theme.text.feedback.warning.base
+      case "pending":
+        return context.theme.text.faint
+      case "edge":
+        return context.theme.text.muted
+      case "edgeLabel":
+        return context.theme.text.faint
+      default:
+        return undefined
+    }
+  }
+
+  // SpanProps omits TextNodeRenderable's fg; the reconciler applies style.fg at runtime.
+  const spanStyle = (tone: GraphTone | undefined) => ({ fg: toneColor(tone) })
+
+  const renderGraphList = (value: RunGraphOutput) => (
+    <box flexDirection="column">
+      {value.nodes.map((node) => {
+        const edges = value.edges.filter((edge) => edge.from === node.nodeID)
+        return (
+          <box flexDirection="column">
+            <text fg={color(node)}>
+              {nodeMarker(node)} {node.label} ({node.agent}) · {node.stepCount} step(s)
+              {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
+            </text>
+            {edges.map((edge) => (
+              <text fg={context.theme.text.muted}>
+                {"    "}
+                {edge.outcome === undefined ? "→" : `${edge.outcome} →`} {terminalLabel(edge.to)}
+              </text>
+            ))}
+          </box>
+        )
+      })}
+    </box>
+  )
+
   const renderGraph = (value: RunGraphOutput) => {
     const completed = value.nodes.filter((node) => node.state === "completed").length
     const blocker = value.blocker
     const failure = value.failure
+    let diagram: ReturnType<typeof renderRunGraphDiagram>
+    try {
+      diagram = renderRunGraphDiagram(value, {
+        width: props.width(),
+        maxLines: props.maxLines(),
+      })
+    } catch (cause) {
+      diagram = { reason: errorDetail(cause, "Unable to draw the workflow graph") }
+    }
     return (
       <box flexDirection="column">
         <text fg={context.theme.text.base}>
@@ -367,23 +440,22 @@ function WorkflowGraph(props: {
           </text>
         ) : null}
         <text> </text>
-        {value.nodes.map((node) => {
-          const edges = value.edges.filter((edge) => edge.from === node.nodeID)
-          return (
-            <box flexDirection="column">
-              <text fg={color(node)}>
-                {nodeMarker(node)} {node.label} ({node.agent}) · {node.stepCount} step(s)
-                {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
+        {"reason" in diagram ? (
+          <box flexDirection="column">
+            {renderGraphList(value)}
+            <text fg={context.theme.text.faint}>Compact view: {diagram.reason}.</text>
+          </box>
+        ) : (
+          <box flexDirection="column">
+            {diagram.lines.map((line) => (
+              <text>
+                {line.map((span) => (
+                  <span style={spanStyle(span.tone)}>{span.text}</span>
+                ))}
               </text>
-              {edges.map((edge) => (
-                <text fg={context.theme.text.muted}>
-                  {"    "}
-                  {edge.outcome === undefined ? "→" : `${edge.outcome} →`} {terminalLabel(edge.to)}
-                </text>
-              ))}
-            </box>
-          )
-        })}
+            ))}
+          </box>
+        )}
         <text> </text>
         <text fg={context.theme.text.faint}>
           enter open active session · p pause/resume · c cancel · r refresh
@@ -439,6 +511,8 @@ function WorkflowPanel(props: { panel: PanelInput }) {
           id="panel"
           source={source}
           active={() => context.ui.panel.current()?.name === PANEL}
+          width={() => Math.max(20, props.panel.width - 2)}
+          maxLines={() => Math.max(8, context.renderer.height - 10)}
         />
       ) : (
         <text fg={context.theme.text.muted}>This session is not a workflow run. Run /flowgraph to choose one.</text>
@@ -611,7 +685,14 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
       <text> </text>
       <text fg={context.theme.text.faint}>up/down select · o open run tab · r refresh · enter active session · p pause/resume · c cancel</text>
       <text> </text>
-      <WorkflowGraph id="page" source={source} active={isPage} onRefresh={() => void refreshRuns()} />
+      <WorkflowGraph
+        id="page"
+        source={source}
+        active={isPage}
+        onRefresh={() => void refreshRuns()}
+        width={() => Math.max(20, context.renderer.width - 2)}
+        maxLines={() => Math.max(8, context.renderer.height - 14 - runs().length)}
+      />
     </box>
   )
 }

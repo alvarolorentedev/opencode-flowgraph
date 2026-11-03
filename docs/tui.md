@@ -30,11 +30,12 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
 - Every run on the server: workflow, status, directory, and objective.
 - Workflow and run identity for the selected run.
 - Status, revision, step count, blocker, and pending native permissions.
-- Nodes with completed, active, failed, paused, and pending markers.
+- A boxed top-down diagram: nodes are boxes, branches sit side by side, and cycles or long jumps route around a right-hand rail.
+- Nodes with completed, active, failed, paused, and pending markers and colours.
 - Outcome-labelled edges, including cycles and terminal edges.
-- The active node is highlighted.
+- The active node is highlighted and pulses while the panel is visible.
 
-The TUI does not render Mermaid. It renders the structured graph from `getRunGraph`, which keeps the terminal view readable and interactive.
+The TUI does not render Mermaid. It renders the structured graph from `getRunGraph` directly. If the diagram does not fit the available width or height, the page falls back to a compact text list and says why.
 
 ## Keys
 

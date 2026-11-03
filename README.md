@@ -237,7 +237,7 @@ The package ships optional UI parts beside the server part:
 - `/flowgraph` accepts arguments: `graph`/`visuals` to view, `runs` to pick a run, `list` to list workflows, `run <id> <objective...>` to start a run, and `<id> <objective...>` as shorthand.
 - `./gui-experimental` adds an experimental OpenCode Desktop panel that renders the Mermaid graph, highlights the active node, and opens node sessions on click. Use the `Workflow` command to pick a run from any project or worktree; each run opens in its own session tab with its own graph. See [`docs/gui.md`](docs/gui.md).
 
-The TUI renders a structured terminal graph rather than Mermaid. The Desktop GUI renders Mermaid. Neither requires a separate server or web app.
+The TUI renders a boxed terminal diagram from the structured run graph, with state colours and a pulsing active node; it does not render Mermaid. When the diagram does not fit the panel, it falls back to a compact text list. The Desktop GUI renders Mermaid. Neither requires a separate server or web app.
 
 `getRunGraph` is the shared read model for both surfaces. It returns node states, node session IDs, edges, the Mermaid source, Mermaid node IDs, and the active node.
 
