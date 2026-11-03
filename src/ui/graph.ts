@@ -27,16 +27,19 @@ type LayoutNode = {
   width: number
 }
 
+type EdgeSide = "none" | "left" | "right"
+
 type LayoutEdge = {
   from: string
   to: string
   outcome?: string
   back: boolean
-  rail: boolean
-  lane: number
+  side: EdgeSide
+  railX: number
   departY: number
   entryY: number
   lineY: number
+  labelY: number
 }
 
 type Label = { text: string; x: number; y: number; maxWidth: number }
@@ -334,11 +337,12 @@ function buildEdges(graph: RunGraphOutput): LayoutEdge[] {
     to: edge.to,
     outcome: edge.outcome,
     back: false,
-    rail: false,
-    lane: 0,
+    side: "none",
+    railX: 0,
     departY: 0,
     entryY: 0,
     lineY: 0,
+    labelY: 0,
   }))
 }
 
@@ -434,7 +438,9 @@ function classifyEdges(nodes: LayoutNode[], edges: LayoutEdge[]) {
     const from = byID.get(edge.from)
     const to = byID.get(edge.to)
     if (!from || !to) continue
-    edge.rail = edge.back || to.rank <= from.rank || to.rank > from.rank + 1
+    if (edge.back || to.rank <= from.rank) edge.side = "left"
+    else if (to.rank > from.rank + 1) edge.side = "right"
+    else edge.side = "none"
   }
 }
 
@@ -449,14 +455,19 @@ function groupRanks(nodes: LayoutNode[]) {
   for (const rank of ranks) {
     layers.get(rank)!.sort((a, b) => {
       if (a.terminal !== b.terminal) return a.terminal ? 1 : -1
+      if (a.terminal) return a.id === "complete" ? -1 : b.id === "complete" ? 1 : 0
       return a.order - b.order
     })
   }
   return { ranks, layers }
 }
 
-// shortcut: no crossing minimisation and one rail lane per back/long edge; complex graphs can look busy.
-// tui.tsx falls back to the compact list when the result does not fit.
+function rankOf(byID: Map<string, LayoutNode>, id: string): number {
+  return byID.get(id)?.rank ?? 0
+}
+
+// shortcut: no crossing minimisation between sibling branches; same-side rail departures can still
+// cross an older inner lane. tui.tsx falls back to the compact list when the result does not fit.
 export function renderRunGraphDiagram(
   graph: RunGraphOutput,
   options: RunGraphDiagramOptions,
@@ -478,11 +489,32 @@ export function renderRunGraphDiagram(
   if (ranks.length === 0) return { reason: "no nodes" }
 
   const byID = new Map(nodes.map((node) => [node.id, node]))
-  const railEdges = edges.filter((edge) => edge.rail)
+  const sideEdges = edges.filter((edge) => edge.side !== "none")
+  const leftEdges = sideEdges
+    .filter((edge) => edge.side === "left")
+    .sort((a, b) => {
+      const rank = rankOf(byID, a.to) - rankOf(byID, b.to)
+      if (rank !== 0) return rank
+      const from = rankOf(byID, b.from) - rankOf(byID, a.from)
+      if (from !== 0) return from
+      return (a.outcome ?? "").localeCompare(b.outcome ?? "")
+    })
+  const rightEdges = sideEdges
+    .filter((edge) => edge.side === "right")
+    .sort((a, b) => {
+      const rank = rankOf(byID, a.to) - rankOf(byID, b.to)
+      if (rank !== 0) return rank
+      const from = rankOf(byID, b.from) - rankOf(byID, a.from)
+      if (from !== 0) return from
+      return (a.outcome ?? "").localeCompare(b.outcome ?? "")
+    })
+
+  const leftReserve = leftEdges.length > 0 ? leftEdges.length * 2 + 2 : 0
+  const rightReserve = rightEdges.length > 0 ? rightEdges.length * 2 + 2 : 0
   const widestLayer = Math.max(...ranks.map((rank) => layers.get(rank)!.length))
-  const railReserve = railEdges.length > 0 ? railEdges.length * 2 + 2 : 0
   const available = Math.max(0, Math.floor(options.width))
-  const availableForBoxes = available - railReserve - BOX_GAP * (widestLayer - 1)
+  const availableForBoxes =
+    available - leftReserve - rightReserve - BOX_GAP * (widestLayer - 1)
   const maxBox = Math.min(
     options.maxBoxWidth ?? DEFAULT_MAX_BOX_WIDTH,
     Math.floor(availableForBoxes / widestLayer),
@@ -492,7 +524,7 @@ export function renderRunGraphDiagram(
   const natural = Math.max(...nodes.map((node) => textWidth(contentFor(node)) + 4))
   const boxWidth = Math.max(MIN_BOX_WIDTH, Math.min(natural, maxBox))
   const contentWidth = widestLayer * boxWidth + BOX_GAP * (widestLayer - 1)
-  const canvasWidth = contentWidth + railReserve
+  const canvasWidth = leftReserve + contentWidth + rightReserve
   if (canvasWidth > available) return { reason: `needs ${canvasWidth} columns` }
 
   for (const rank of ranks) {
@@ -500,70 +532,95 @@ export function renderRunGraphDiagram(
     const layerWidth = layer.length * boxWidth + BOX_GAP * (layer.length - 1)
     const layerX = Math.floor((contentWidth - layerWidth) / 2)
     layer.forEach((node, index) => {
-      node.x = layerX + index * (boxWidth + BOX_GAP)
+      node.x = leftReserve + layerX + index * (boxWidth + BOX_GAP)
       node.width = boxWidth
     })
   }
 
-  railEdges.sort((a, b) => {
-    const aFrom = byID.get(a.from)?.rank ?? 0
-    const bFrom = byID.get(b.from)?.rank ?? 0
-    if (aFrom !== bFrom) return aFrom - bFrom
-    const aTo = byID.get(a.to)?.rank ?? 0
-    const bTo = byID.get(b.to)?.rank ?? 0
-    if (aTo !== bTo) return aTo - bTo
-    const aOutcome = a.outcome ?? ""
-    const bOutcome = b.outcome ?? ""
-    return aOutcome < bOutcome ? -1 : aOutcome > bOutcome ? 1 : 0
-  })
-  railEdges.forEach((edge, index) => void (edge.lane = index))
+  leftEdges.forEach((edge, index) => void (edge.railX = 2 + index * 2))
+  rightEdges.forEach(
+    (edge, index) => void (edge.railX = leftReserve + contentWidth + 1 + index * 2),
+  )
 
-  const firstRank = ranks[0]!
-  const topEntries = railEdges.filter((edge) => (byID.get(edge.to)?.rank ?? 0) === firstRank)
-  const topMargin = topEntries.length > 0 ? topEntries.length + 1 : 0
+  const entryGroups = new Map<string, LayoutEdge[]>()
+  for (const edge of [...leftEdges, ...rightEdges]) {
+    const key = `${edge.to}\u0000${edge.side}`
+    const group = entryGroups.get(key) ?? []
+    group.push(edge)
+    entryGroups.set(key, group)
+  }
+  for (const group of entryGroups.values()) {
+    if (group.length > 3) return { reason: `too many edges into ${group[0]!.to}` }
+  }
 
-  let y = topMargin
+  let y = 0
   for (let index = 0; index < ranks.length; index++) {
     const rank = ranks[index]!
-    const layer = layers.get(rank)!
-    for (const node of layer) node.y = y
-
+    for (const node of layers.get(rank)!) node.y = y
     const nextRank = ranks[index + 1]
-    if (nextRank === undefined) {
-      const departures = railEdges.filter((edge) => (byID.get(edge.from)?.rank ?? 0) === rank)
-      const bottomMargin = departures.length > 0 ? departures.length + 1 : 0
-      departures.forEach((edge, departureIndex) => {
-        edge.departY = y + BOX_HEIGHT + departureIndex
+    const departures = sideEdges
+      .filter((edge) => rankOf(byID, edge.from) === rank)
+      .sort((a, b) => {
+        const aOuter = Math.abs(a.railX - (leftReserve + contentWidth / 2))
+        const bOuter = Math.abs(b.railX - (leftReserve + contentWidth / 2))
+        if (aOuter !== bOuter) return bOuter - aOuter
+        return a.railX - b.railX
       })
-      y += BOX_HEIGHT + bottomMargin
+
+    if (nextRank === undefined) {
+      let cursor = y + BOX_HEIGHT
+      for (const edge of departures) {
+        if (outcomeLabel(edge.outcome)) edge.labelY = cursor++
+        edge.departY = cursor++
+      }
+      y = cursor + (departures.length > 0 ? 1 : 0)
       break
     }
 
-    const forward = edges.filter(
-      (edge) =>
-        !edge.rail &&
-        (byID.get(edge.from)?.rank ?? 0) === rank &&
-        (byID.get(edge.to)?.rank ?? 0) === nextRank,
-    )
-    const departures = railEdges.filter((edge) => (byID.get(edge.from)?.rank ?? 0) === rank)
-    const entries = railEdges.filter((edge) => (byID.get(edge.to)?.rank ?? 0) === nextRank)
+    const forward = edges
+      .filter(
+        (edge) =>
+          edge.side === "none" &&
+          rankOf(byID, edge.from) === rank &&
+          rankOf(byID, edge.to) === nextRank,
+      )
+      .sort((a, b) => {
+        const fromA = byID.get(a.from)
+        const fromB = byID.get(b.from)
+        const ax = (fromA?.x ?? 0) + Math.floor((fromA?.width ?? 0) / 2)
+        const bx = (fromB?.x ?? 0) + Math.floor((fromB?.width ?? 0) / 2)
+        if (ax !== bx) return ax - bx
+        return (byID.get(a.to)?.x ?? 0) - (byID.get(b.to)?.x ?? 0)
+      })
+
     const gapStart = y + BOX_HEIGHT
-
-    forward.forEach((edge, edgeIndex) => {
-      edge.lineY = gapStart + 1 + edgeIndex
-    })
-    departures.forEach((edge, departureIndex) => {
-      edge.departY = gapStart + 1 + forward.length + departureIndex
-    })
-    entries.forEach((edge, entryIndex) => {
-      edge.entryY = gapStart + 1 + forward.length + departures.length + entryIndex
-    })
-
-    const gapHeight = Math.max(2, 2 + forward.length + departures.length + entries.length)
-    y += BOX_HEIGHT + gapHeight
+    let cursor = gapStart
+    for (const edge of departures) {
+      if (outcomeLabel(edge.outcome)) edge.labelY = cursor++
+      edge.departY = cursor++
+    }
+    for (const edge of forward) {
+      const from = byID.get(edge.from)
+      const to = byID.get(edge.to)
+      if (!from || !to) continue
+      const sx = from.x + Math.floor(from.width / 2)
+      const tx = to.x + Math.floor(to.width / 2)
+      if (outcomeLabel(edge.outcome)) edge.labelY = cursor++
+      if (sx !== tx) edge.lineY = cursor++
+    }
+    y = Math.max(cursor + 1, gapStart + 2)
   }
 
-  topEntries.forEach((edge, index) => void (edge.entryY = index))
+  for (const group of entryGroups.values()) {
+    const target = byID.get(group[0]!.to)
+    if (!target) continue
+    const rows =
+      group.length <= 2
+        ? [target.y + 1, target.y + 2]
+        : [target.y, target.y + 1, target.y + 2]
+    group.sort((a, b) => a.railX - b.railX)
+    group.forEach((edge, index) => void (edge.entryY = rows[index]!))
+  }
 
   const canvasHeight = y
   if (canvasHeight > options.maxLines) {
@@ -602,55 +659,67 @@ export function renderRunGraphDiagram(
     const sx = from.x + Math.floor(from.width / 2)
     const tx = to.x + Math.floor(to.width / 2)
 
-    canvas.addBits(sx, from.y + BOX_HEIGHT - 1, D, "edge")
-    canvas.addBits(tx, to.y, U, "edge")
-
-    if (!edge.rail) {
-      if (sx === tx) {
-        canvas.segV(sx, from.y + BOX_HEIGHT - 1, to.y - 1, "edge")
-      } else {
-        canvas.segV(sx, from.y + BOX_HEIGHT - 1, edge.lineY, "edge")
-        canvas.segH(edge.lineY, sx, tx, "edge")
-        canvas.segV(tx, edge.lineY, to.y - 1, "edge")
-      }
-      canvas.set(tx, to.y - 1, "▼", "edge")
-
-      const label = outcomeLabel(edge.outcome)
-      if (label) {
-        const start = sx === tx ? sx + 2 : Math.min(sx, tx) + 2
-        const labelLimit = railEdges.length > 0 ? contentWidth + 2 : contentWidth
-        labels.push({
-          text: label,
-          x: start,
-          y: edge.lineY,
-          maxWidth: Math.max(0, labelLimit - start - 1),
-        })
-      }
+    if (edge.side === "left") {
+      canvas.addBits(sx, from.y + BOX_HEIGHT - 1, D, "edge")
+      canvas.segV(sx, from.y + BOX_HEIGHT - 1, edge.departY, "edge")
+      canvas.segH(edge.departY, sx, edge.railX, "edge")
+      canvas.segV(edge.railX, edge.departY, edge.entryY, "edge")
+      canvas.segH(edge.entryY, edge.railX, to.x - 1, "edge")
+      canvas.set(to.x - 1, edge.entryY, "▶", "edge")
+      canvas.addBits(to.x, edge.entryY, L, "edge")
       continue
     }
 
-    const railX = contentWidth + 2 + edge.lane * 2
-    canvas.segV(sx, from.y + BOX_HEIGHT - 1, edge.departY, "edge")
-    canvas.segH(edge.departY, sx, railX, "edge")
-    canvas.segV(railX, edge.departY, edge.entryY, "edge")
-    canvas.segH(edge.entryY, railX, tx, "edge")
-    canvas.segV(tx, edge.entryY, to.y - 1, "edge")
-    canvas.set(tx, to.y - 1, "▼", "edge")
+    if (edge.side === "right") {
+      canvas.addBits(sx, from.y + BOX_HEIGHT - 1, D, "edge")
+      canvas.segV(sx, from.y + BOX_HEIGHT - 1, edge.departY, "edge")
+      canvas.segH(edge.departY, sx, edge.railX, "edge")
+      canvas.segV(edge.railX, edge.departY, edge.entryY, "edge")
+      canvas.segH(edge.entryY, edge.railX, to.x + to.width, "edge")
+      canvas.set(to.x + to.width, edge.entryY, "◀", "edge")
+      canvas.addBits(to.x + to.width - 1, edge.entryY, R, "edge")
+      continue
+    }
 
+    canvas.addBits(sx, from.y + BOX_HEIGHT - 1, D, "edge")
+    canvas.addBits(tx, to.y, U, "edge")
+    if (sx === tx) {
+      canvas.segV(sx, from.y + BOX_HEIGHT - 1, to.y - 1, "edge")
+    } else {
+      canvas.segV(sx, from.y + BOX_HEIGHT - 1, edge.lineY, "edge")
+      canvas.segH(edge.lineY, sx, tx, "edge")
+      canvas.segV(tx, edge.lineY, to.y - 1, "edge")
+    }
+    canvas.set(tx, to.y - 1, "▼", "edge")
+  }
+
+  const contentEnd = leftReserve + contentWidth
+  for (const edge of edges) {
     const label = outcomeLabel(edge.outcome)
-    if (label) {
-      const sourceStart = sx + 2
-      const sourceWidth = railX - sourceStart - 1
-      const targetStart = tx + 2
-      const targetWidth = railX - targetStart - 1
-      if (sourceWidth >= 4) {
-        labels.push({ text: label, x: sourceStart, y: edge.departY, maxWidth: sourceWidth })
-      } else if (targetWidth > 0) {
-        labels.push({ text: label, x: targetStart, y: edge.entryY, maxWidth: targetWidth })
-      } else {
-        labels.push({ text: label, x: 1, y: edge.departY, maxWidth: contentWidth - 2 })
+    if (!label) continue
+    const from = byID.get(edge.from)
+    const to = byID.get(edge.to)
+    if (!from || !to) continue
+    const sx = from.x + Math.floor(from.width / 2)
+    const tx = to.x + Math.floor(to.width / 2)
+    let x: number
+    let maxWidth: number
+    if (edge.side !== "none" || sx === tx) {
+      x = sx + 2
+      maxWidth = contentEnd - x - 1
+      if (maxWidth < textWidth(label)) {
+        x = sx + 1
+        maxWidth = contentEnd - x - 1
+      }
+    } else {
+      x = Math.min(sx, tx) + 2
+      maxWidth = Math.abs(sx - tx) - 2
+      if (maxWidth < 4) {
+        x = sx + 2
+        maxWidth = contentEnd - x - 1
       }
     }
+    labels.push({ text: label, x, y: edge.labelY, maxWidth: Math.max(0, maxWidth) })
   }
 
   for (const label of labels) {

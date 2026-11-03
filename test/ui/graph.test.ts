@@ -89,6 +89,33 @@ nodes:
     next: complete
 `
 
+const multiRailSource = `version: 1
+name: multi
+entry: a
+limits:
+  max_steps: 20
+  timeout_seconds: 60
+nodes:
+  a:
+    agent: a
+    routes:
+      next: b
+      skip: d
+  b:
+    agent: b
+    routes:
+      next: c
+      long: d
+  c:
+    agent: c
+    next: d
+  d:
+    agent: d
+    routes:
+      retry: a
+      done: complete
+`
+
 const wideSource = `version: 1
 name: wide
 entry: a
@@ -258,6 +285,25 @@ describe("renderRunGraphDiagram", () => {
     expect(output).toContain("passed")
     expect(output).toContain("blocked")
     expect(output).not.toContain("passedblocked")
+    expect(output).not.toContain("┼")
+  })
+
+  it("draws outcome labels on their own rows and enters boxes from the side", () => {
+    const result = diagram(
+      renderRunGraphDiagram(
+        graph(productSource, { status: "running", currentNode: "tester" }),
+        { width: 100, maxLines: 60 },
+      ),
+    )
+    const lines = result.lines.map((line) => line.map((span) => span.text).join(""))
+    for (const label of ["needs clarification", "blocked", "passed", "failed"]) {
+      const row = lines.find((line) => line.includes(label))
+      expect(row).toBeDefined()
+      expect(row).not.toContain("─")
+    }
+    const output = lines.join("\n")
+    expect(output).toContain("▶┤")
+    expect(output).toContain("├◀")
   })
 
   it("routes a self-loop through a rail", () => {
@@ -269,6 +315,7 @@ describe("renderRunGraphDiagram", () => {
     )
     expect(output).toContain("retry")
     expect(output).toContain("○ Complete")
+    expect(output).not.toContain("┼")
   })
 
   it("converges a join on the target box", () => {
@@ -281,6 +328,20 @@ describe("renderRunGraphDiagram", () => {
     expect(output).toContain("left")
     expect(output).toContain("right")
     expect(output).toContain("▶ C · c")
+    expect(output).not.toContain("┼")
+  })
+
+  it("keeps multiple rails on separate lanes without crossings", () => {
+    const output = text(
+      renderRunGraphDiagram(graph(multiRailSource, { status: "running", currentNode: "d" }), {
+        width: 100,
+        maxLines: 60,
+      }),
+    )
+    expect(output).toContain("skip")
+    expect(output).toContain("long")
+    expect(output).toContain("retry")
+    expect(output).not.toContain("┼")
   })
 
   it("measures terminal display width", () => {

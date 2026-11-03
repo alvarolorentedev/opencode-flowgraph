@@ -30,7 +30,8 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
 - Every run on the server: workflow, status, directory, and objective.
 - Workflow and run identity for the selected run.
 - Status, revision, step count, blocker, and pending native permissions.
-- A boxed top-down diagram: nodes are boxes, branches sit side by side, and cycles or long jumps route around a right-hand rail.
+- A boxed top-down diagram: nodes are boxes, branches sit side by side, cycles route around a left-hand rail, long jumps around a right-hand rail, and rail edges enter boxes from the side.
+- Outcome labels sit on their own row, or beside a vertical edge, so lines stay unbroken.
 - Nodes with completed (green), active (yellow), failed or routed-back (red), paused, and pending markers and colours.
 - Outcome-labelled edges, including cycles and terminal edges.
 - The active node is highlighted and pulses while the panel is visible.
