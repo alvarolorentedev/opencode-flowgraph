@@ -1,10 +1,10 @@
 # TUI graph
 
-The package ships a TUI part. It adds a full-screen `Workflow` page, a `Workflow graph` session panel, and a `/workflow` command.
+The package ships a TUI part. It adds a full-screen `Workflow` page, a `Workflow graph` session panel, and a `/flowgraph` command.
 
 ## Open it
 
-1. Run `/workflow` or use the command palette: **Workflow**.
+1. Run `/flowgraph` or use the command palette: **Workflow**.
 2. If the current session belongs to a workflow run, the graph opens in its session panel.
 3. Otherwise the full-screen workflow page opens. No session is required.
 
@@ -12,16 +12,16 @@ The page lists every workflow run visible on the connected server, including run
 
 ## Commands
 
-The `/workflow` slash command accepts arguments:
+The `/flowgraph` slash command accepts arguments:
 
 | Command | Action |
 |---|---|
-| `/workflow` or `/workflow graph` | Open the current workflow session panel, or the all-runs page. |
-| `/workflow visuals` | Same as `graph`. |
-| `/workflow runs` | Open the all-runs page. |
-| `/workflow list` | List available workflows and start one. |
-| `/workflow run <workflow-id> <objective...>` | Start a run. |
-| `/workflow <workflow-id> <objective...>` | Shorthand for `run`. |
+| `/flowgraph` or `/flowgraph graph` | Open the current workflow session panel, or the all-runs page. |
+| `/flowgraph visuals` | Same as `graph`. |
+| `/flowgraph runs` | Open the all-runs page. |
+| `/flowgraph list` | List available workflows and start one. |
+| `/flowgraph run <workflow-id> <objective...>` | Start a run. |
+| `/flowgraph <workflow-id> <objective...>` | Shorthand for `run`. |
 
 Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the new run's own session and graph panel.
 

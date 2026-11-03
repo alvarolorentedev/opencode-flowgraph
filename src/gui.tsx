@@ -528,7 +528,7 @@ export default Plugin.define({
       title: "Workflow",
       description: "Open the graph, list workflows, or start a run",
       group: "Workflow",
-      slash: { name: "workflow", arguments: true },
+      slash: { name: "flowgraph", arguments: true },
       run: (input) => void runCommand(input),
     }))
 

@@ -387,7 +387,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
     <box flexDirection="column" padding={1}>
       <Show
         when={source()}
-        fallback={<text fg={context.theme.text.muted}>This session is not a workflow run. Run /workflow to choose one.</text>}
+        fallback={<text fg={context.theme.text.muted}>This session is not a workflow run. Run /flowgraph to choose one.</text>}
       >
         <WorkflowGraph
           id="panel"
@@ -693,7 +693,7 @@ export default Plugin.define({
           description: "Open the graph, list workflows, or start a run",
           group: "Flowgraph",
           palette: true,
-          slash: { name: "workflow", arguments: true },
+          slash: { name: "flowgraph", arguments: true },
           run: (input) => void runCommand(input),
         },
       ],

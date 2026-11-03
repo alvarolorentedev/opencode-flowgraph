@@ -40,16 +40,16 @@ This writes `dist/gui-experimental.cjs`. The release workflow and `prepublishOnl
 
 Use the command palette: **Workflow**, or the session side panel's **+** menu and choose **Workflow graph**.
 
-The `/workflow` slash command accepts arguments:
+The `/flowgraph` slash command accepts arguments:
 
 | Command | Action |
 |---|---|
-| `/workflow` or `/workflow graph` | Open the current workflow graph, or pick a run. |
-| `/workflow visuals` | Same as `graph`. |
-| `/workflow runs` | Pick a run. |
-| `/workflow list` | List available workflows and start one. |
-| `/workflow run <workflow-id> <objective...>` | Start a run. |
-| `/workflow <workflow-id> <objective...>` | Shorthand for `run`. |
+| `/flowgraph` or `/flowgraph graph` | Open the current workflow graph, or pick a run. |
+| `/flowgraph visuals` | Same as `graph`. |
+| `/flowgraph runs` | Pick a run. |
+| `/flowgraph list` | List available workflows and start one. |
+| `/flowgraph run <workflow-id> <objective...>` | Start a run. |
+| `/flowgraph <workflow-id> <objective...>` | Shorthand for `run`. |
 
 Starting a workflow asks for a missing workflow ID or objective with a dialog, then opens the new run's own session and graph panel.
 
