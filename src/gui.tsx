@@ -42,6 +42,15 @@ const css = `
 .awf-mermaid g.node.wf-active polygon,
 .awf-mermaid g.node.wf-active path { fill:#f4c95d !important; stroke:#8a5a00 !important; stroke-width:2px !important; }
 .awf-mermaid g.node.wf-active .nodeLabel, .awf-mermaid g.node.wf-active text { fill:#1a202c !important; color:#1a202c !important; }
+.awf-mermaid g.node.wf-completed rect,
+.awf-mermaid g.node.wf-completed polygon,
+.awf-mermaid g.node.wf-completed path { fill:#2f855a !important; stroke:#68d391 !important; }
+.awf-mermaid g.node.wf-rejected rect,
+.awf-mermaid g.node.wf-rejected polygon,
+.awf-mermaid g.node.wf-rejected path,
+.awf-mermaid g.node.wf-failed rect,
+.awf-mermaid g.node.wf-failed polygon,
+.awf-mermaid g.node.wf-failed path { fill:#9b2c2c !important; stroke:#fc8181 !important; }
 .awf-zoom { display:inline-flex; align-items:center; gap:4px; }
 .awf-zoom button { min-width:24px; }
 .awf-zoom span { opacity:.65; min-width:36px; text-align:center; }
@@ -112,9 +121,20 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
         const mermaidID = value.mermaidNodes.find(
           (node) => element.id.includes(`-${node.mermaidID}-`) || element.id.endsWith(`-${node.mermaidID}`),
         )?.nodeID
-        if (!mermaidID) continue
+        if (!mermaidID) {
+          if (
+            value.status === "completed" &&
+            (element.id.includes("-complete-") || element.id.endsWith("-complete"))
+          ) {
+            element.classList.add("wf-completed")
+          }
+          continue
+        }
         const node = value.nodes.find((candidate) => candidate.nodeID === mermaidID)
         if (node?.state === "active") element.classList.add("wf-active")
+        else if (node?.state === "completed") {
+          element.classList.add(node.routedBack ? "wf-rejected" : "wf-completed")
+        } else if (node?.state === "failed") element.classList.add("wf-failed")
         const sessionID = nodeSession(value, mermaidID)
         if (sessionID) element.classList.add("wf-clickable")
         element.addEventListener("click", () => {

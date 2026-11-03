@@ -1,5 +1,5 @@
 import { buildMermaidModel, renderMermaid } from "../workflow/mermaid.js"
-import { buildGraph } from "../workflow/graph.js"
+import { buildGraph, resolveTransition } from "../workflow/graph.js"
 import type { RunGraphEdge, RunGraphNode, RunGraphOutput } from "../contract.js"
 import type { RunRecord, PermissionSummary } from "../state/types.js"
 
@@ -22,6 +22,26 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     const previous = latest.get(step.nodeID)
     if (!previous || step.seq >= previous.seq) latest.set(step.nodeID, step)
   }
+  const firstSeq = new Map<string, number>()
+  for (const step of run.steps) {
+    const previous = firstSeq.get(step.nodeID)
+    if (previous === undefined || step.seq < previous) firstSeq.set(step.nodeID, step.seq)
+  }
+
+  const routedBack = new Set<string>()
+  for (const [nodeID, step] of latest) {
+    if (step.status !== "completed") continue
+    let target: string
+    try {
+      target = resolveTransition(graph, nodeID, step.outcome)
+    } catch {
+      continue
+    }
+    if (!graph.nodes[target]) continue
+    const previous = firstSeq.get(target)
+    if (target === nodeID || (previous !== undefined && previous < step.seq)) routedBack.add(nodeID)
+  }
+
   const completed = new Set<string>()
   const failed = new Set<string>()
   for (const [nodeID, step] of latest) {
@@ -50,6 +70,7 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
       label: node.label,
       agent: node.agent,
       state,
+      routedBack: routedBack.has(node.id),
       sessionIDs: sessions.get(node.id) ?? [],
       stepCount,
     }

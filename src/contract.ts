@@ -114,6 +114,7 @@ export const RunGraphNodeSchema = z
     label: z.string().min(1).max(200),
     agent: z.string().min(1).max(128),
     state: RunGraphNodeStateSchema,
+    routedBack: z.boolean().optional(),
     sessionIDs: z.array(z.string().min(1).max(128)).max(500),
     stepCount: z.number().int().nonnegative(),
   })

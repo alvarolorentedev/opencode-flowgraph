@@ -6,7 +6,7 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 
 - The generated Mermaid graph.
 - The active node highlighted.
-- Completed, failed, paused, and pending nodes styled by the graph state.
+- Completed nodes styled green, nodes whose latest route looped back red until a later attempt passes, the active node yellow, and failed/paused/pending nodes styled by state.
 - Run status, revision, failure reason, blocker, and pending permission count.
 - Click a node to open its native session. A node without a session shows a toast instead.
 - Buttons for changing runs, pause, resume, cancel, and graph zoom.

@@ -194,6 +194,58 @@ describe("renderRunGraphDiagram", () => {
     expect(output).toContain("✓ Reviewer · reviewer")
   })
 
+  it("marks a completed node that routed back as rejected until it passes", () => {
+    const rejectedSteps: RunRecord["steps"] = [
+      ...completedDeveloper,
+      {
+        stepID: "step_000002_a001",
+        seq: 2,
+        nodeID: "reviewer",
+        outcome: "changes_requested",
+        status: "completed",
+        sessionID: "sess_rev_1",
+        startedAt: 3,
+        completedAt: 4,
+      },
+    ]
+    const rejected = diagram(
+      renderRunGraphDiagram(
+        graph(reviewSource, { status: "running", stepCount: 2, steps: rejectedSteps }),
+        { width: 80, maxLines: 40 },
+      ),
+    )
+    const rejectedOutput = text(rejected)
+    expect(rejectedOutput).toContain("✗ Reviewer · reviewer")
+    expect(rejectedOutput).toContain("✓ Developer · developer")
+    expect(rejected.lines.flat().find((span) => span.text.includes("✗ Reviewer"))?.tone).toBe("rejected")
+
+    const passed = diagram(
+      renderRunGraphDiagram(
+        graph(reviewSource, {
+          status: "completed",
+          stepCount: 3,
+          steps: [
+            ...rejectedSteps,
+            {
+              stepID: "step_000003_a001",
+              seq: 3,
+              nodeID: "reviewer",
+              outcome: "approved",
+              status: "completed",
+              sessionID: "sess_rev_2",
+              startedAt: 5,
+              completedAt: 6,
+            },
+          ],
+        }),
+        { width: 80, maxLines: 40 },
+      ),
+    )
+    const passedOutput = text(passed)
+    expect(passedOutput).toContain("✓ Reviewer · reviewer")
+    expect(passed.lines.flat().find((span) => span.text.includes("✓ Reviewer"))?.tone).toBe("completed")
+  })
+
   it("keeps sibling branch labels on separate rows", () => {
     const output = text(
       renderRunGraphDiagram(

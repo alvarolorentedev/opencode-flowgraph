@@ -114,6 +114,64 @@ describe("buildRunGraph", () => {
     })
   })
 
+  it("marks a completed node that routed back and clears it after a forward attempt", () => {
+    const steps = [
+      {
+        stepID: "step_000001_a001",
+        seq: 1,
+        nodeID: "developer",
+        outcome: "done",
+        status: "completed" as const,
+        sessionID: "sess_dev_1",
+        startedAt: 1,
+        completedAt: 2,
+      },
+      {
+        stepID: "step_000002_a001",
+        seq: 2,
+        nodeID: "reviewer",
+        outcome: "changes_requested",
+        status: "completed" as const,
+        sessionID: "sess_rev_1",
+        startedAt: 3,
+        completedAt: 4,
+      },
+    ]
+    const back = buildRunGraph(makeRunRecord({ status: "running", stepCount: 2, steps }))
+    expect(back.nodes.find((node) => node.nodeID === "reviewer")).toMatchObject({
+      state: "completed",
+      routedBack: true,
+    })
+    expect(back.nodes.find((node) => node.nodeID === "developer")).toMatchObject({
+      state: "completed",
+      routedBack: false,
+    })
+
+    const passed = buildRunGraph(
+      makeRunRecord({
+        status: "completed",
+        stepCount: 3,
+        steps: [
+          ...steps,
+          {
+            stepID: "step_000003_a001",
+            seq: 3,
+            nodeID: "reviewer",
+            outcome: "approved",
+            status: "completed",
+            sessionID: "sess_rev_2",
+            startedAt: 5,
+            completedAt: 6,
+          },
+        ],
+      }),
+    )
+    expect(passed.nodes.find((node) => node.nodeID === "reviewer")).toMatchObject({
+      state: "completed",
+      routedBack: false,
+    })
+  })
+
   it("marks failed nodes and exposes blockers", () => {
     const run = makeRunRecord({
       status: "failed",

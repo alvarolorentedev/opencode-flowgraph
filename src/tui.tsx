@@ -33,6 +33,7 @@ function terminalLabel(target: string): string {
 }
 
 function nodeMarker(node: RunGraphNode): string {
+  if (node.state === "completed" && node.routedBack === true) return "✗"
   switch (node.state) {
     case "active":
       return "▶"
@@ -342,11 +343,12 @@ function WorkflowGraph(props: {
   }))
 
   const color = (node: RunGraphNode) => {
+    if (node.state === "completed" && node.routedBack === true) return context.theme.text.feedback.error.base
     switch (node.state) {
       case "active":
-        return context.theme.text.feedback.success.base
+        return context.theme.text.feedback.warning.base
       case "completed":
-        return context.theme.text.muted
+        return context.theme.text.feedback.success.base
       case "failed":
         return context.theme.text.feedback.error.base
       case "paused":
@@ -360,10 +362,11 @@ function WorkflowGraph(props: {
     switch (tone) {
       case "active":
         return pulse()
-          ? context.theme.text.feedback.success.muted
-          : context.theme.text.feedback.success.base
+          ? context.theme.text.feedback.warning.muted
+          : context.theme.text.feedback.warning.base
       case "completed":
-        return context.theme.text.muted
+        return context.theme.text.feedback.success.base
+      case "rejected":
       case "failed":
         return context.theme.text.feedback.error.base
       case "paused":

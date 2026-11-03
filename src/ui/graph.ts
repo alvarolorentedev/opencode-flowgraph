@@ -1,6 +1,6 @@
 import type { RunGraphNode, RunGraphOutput } from "../contract.js"
 
-export type GraphTone = RunGraphNode["state"] | "edge" | "edgeLabel"
+export type GraphTone = RunGraphNode["state"] | "rejected" | "edge" | "edgeLabel"
 export type DiagramSpan = { text: string; tone?: GraphTone }
 export type DiagramLine = DiagramSpan[]
 export type RunGraphDiagram = { lines: DiagramLine[]; width: number; height: number }
@@ -18,6 +18,7 @@ type LayoutNode = {
   label: string
   agent?: string
   state: RunGraphNode["state"]
+  routedBack: boolean
   terminal: boolean
   rank: number
   order: number
@@ -270,8 +271,12 @@ function cleanText(value: string): string {
   return value.replace(/[\r\n\t]+/gu, " ").replace(/[\u0000-\u001f\u007f]/gu, " ")
 }
 
+function toneFor(node: LayoutNode): GraphTone {
+  return node.state === "completed" && node.routedBack ? "rejected" : node.state
+}
+
 function contentFor(node: LayoutNode): string {
-  const marker = MARKERS[node.state]
+  const marker = toneFor(node) === "rejected" ? MARKERS.failed : MARKERS[node.state]
   const label = cleanText(node.label)
   return node.agent ? `${marker} ${label} · ${cleanText(node.agent)}` : `${marker} ${label}`
 }
@@ -287,6 +292,7 @@ function buildNodes(graph: RunGraphOutput): LayoutNode[] {
     label: node.label,
     agent: node.agent,
     state: node.state,
+    routedBack: node.routedBack === true,
     terminal: false,
     rank: 0,
     order: order.get(node.nodeID) ?? 0,
@@ -310,6 +316,7 @@ function buildNodes(graph: RunGraphOutput): LayoutNode[] {
       id,
       label: id === "complete" ? "Complete" : "Pause",
       state,
+      routedBack: false,
       terminal: true,
       rank: 0,
       order: Number.MAX_SAFE_INTEGER,
@@ -571,7 +578,7 @@ export function renderRunGraphDiagram(
     const top = node.y
     const bottom = node.y + BOX_HEIGHT - 1
     const right = x + node.width - 1
-    const tone = node.state
+    const tone = toneFor(node)
 
     for (let offset = 1; offset < node.width - 1; offset++) {
       canvas.addBits(x + offset, top, L | R, tone)
