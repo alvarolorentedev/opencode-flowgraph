@@ -21,11 +21,11 @@ npm login
 npm publish --access public
 ```
 
-`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.2.1` and creates the package on npm.
+`npm publish` runs `prepublishOnly`, which typechecks and tests the package. It publishes version `0.4.0` and creates the package on npm.
 
 Then configure the trusted publisher:
 
-1. Open `https://www.npmjs.com/package/opencode-flowgraph`
+1. Open `https://www.npmjs.com/package/@alvarolorentedev/opencode-flowgraph`
 2. Open **Settings** and find **Trusted Publisher**
 3. Choose **GitHub Actions**
 4. Enter:
@@ -41,7 +41,7 @@ After the configuration is saved, it must complete its first successful publish 
 You can also configure it with npm CLI 11.15+:
 
 ```sh
-npm trust github opencode-flowgraph \
+npm trust github @alvarolorentedev/opencode-flowgraph \
   --repo alvarolorentedev/opencode-flowgraph \
   --file release.yml \
   --allow-publish
@@ -50,7 +50,7 @@ npm trust github opencode-flowgraph \
 Verify:
 
 ```sh
-npm trust list opencode-flowgraph
+npm trust list @alvarolorentedev/opencode-flowgraph
 ```
 
 After the trusted publisher works, optionally restrict token publishing:
@@ -109,8 +109,8 @@ You can also create the tag through the GitHub Releases UI. Make sure the tag st
 ## Verify
 
 ```sh
-npm view opencode-flowgraph version
-npm view opencode-flowgraph dist-tags
+npm view @alvarolorentedev/opencode-flowgraph version
+npm view @alvarolorentedev/opencode-flowgraph dist-tags
 npm audit signatures
 ```
 
@@ -119,7 +119,7 @@ npm audit signatures
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-flowgraph"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph"]
 }
 ```
 
@@ -127,7 +127,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.2.2"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.4.0"]
 }
 ```
 
@@ -147,7 +147,7 @@ OpenCode loads the published package directly. No clone, build, or local path is
 Publish a fixed patch version and deprecate the broken one:
 
 ```sh
-npm deprecate opencode-flowgraph@0.2.2 "Broken release; use 0.2.3"
+npm deprecate @alvarolorentedev/opencode-flowgraph@0.4.0 "Broken release; use 0.4.1"
 ```
 
 Do not rewrite tags. The workflow publishes exactly the tagged commit.

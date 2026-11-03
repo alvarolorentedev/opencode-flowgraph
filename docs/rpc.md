@@ -5,14 +5,14 @@ The plugin registers the `flowgraph` RPC at each OpenCode location where it is l
 ## Contract
 
 ```ts
-import { FlowgraphRpc } from "opencode-flowgraph/rpc"
+import { FlowgraphRpc } from "@alvarolorentedev/opencode-flowgraph/rpc"
 ```
 
 Use it with the official client:
 
 ```ts
 import { OpenCode } from "@opencode/client"
-import { FlowgraphRpc } from "opencode-flowgraph/rpc"
+import { FlowgraphRpc } from "@alvarolorentedev/opencode-flowgraph/rpc"
 
 const client = OpenCode.make({ baseUrl, headers })
 const workflows = client.rpc(FlowgraphRpc)

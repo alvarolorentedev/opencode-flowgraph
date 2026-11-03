@@ -19,7 +19,7 @@ Install from npm by adding the plugin to `opencode.jsonc`:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-flowgraph"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph"]
 }
 ```
 
@@ -27,7 +27,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["opencode-flowgraph@0.3.0"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.4.0"]
 }
 ```
 
@@ -163,7 +163,7 @@ The tool is registered for the whole location because OpenCode plugin tools are 
 
 ## RPC
 
-The shared contract is exported from `opencode-flowgraph/rpc`.
+The shared contract is exported from `@alvarolorentedev/opencode-flowgraph/rpc`.
 
 | Method | Purpose |
 |---|---|
@@ -186,7 +186,7 @@ Event: `runUpdated` with project, run, workflow, status, current node, revision,
 
 ```ts
 import { OpenCode } from "@opencode/client"
-import { FlowgraphRpc } from "opencode-flowgraph/rpc"
+import { FlowgraphRpc } from "@alvarolorentedev/opencode-flowgraph/rpc"
 
 const client = OpenCode.make({ baseUrl, headers })
 const workflows = client.rpc(FlowgraphRpc)
