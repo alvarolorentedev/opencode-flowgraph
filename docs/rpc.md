@@ -43,6 +43,21 @@ const unsubscribe = workflows.events.on("runUpdated", (event) => {
 
 Events are live-only. After reconnecting, call `listRuns` or `getRun`.
 
+## Server command (mobile)
+
+The server part also registers a `flowgraph` slash command, so API-driven
+clients (mobile, web) that only see server commands via `command.list` can use
+the plugin without the TUI or Desktop GUI:
+
+- `/flowgraph list` — list workflows
+- `/flowgraph run <workflow-id> <objective...>` — start a run
+- `/flowgraph runs` — list runs
+- `/flowgraph graph <runID>` — describe one run
+
+The command replies with plain text in the invoking session. It cannot open
+panels or dialogs; pause, resume, and cancel stay on RPC (`pauseRun`,
+`resumeRun`, `cancelRun`) and the TUI/GUI surfaces.
+
 ## HTTP
 
 The generic RPC route is:

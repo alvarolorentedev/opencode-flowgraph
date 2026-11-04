@@ -12,6 +12,7 @@ import { ReportTool } from "./execution/report-tool.js"
 import { registerToolHooks } from "./execution/tool-hooks.js"
 import { WorkflowRunner } from "./execution/runner.js"
 import { OpenCodeNativeRuntime } from "./execution/native-agents.js"
+import { runServerCommand } from "./server-command.js"
 import { newInstanceID } from "./util/ids.js"
 import { PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
 
@@ -120,6 +121,20 @@ export default Plugin.define({
 
     const rpcRegistration = await ctx.rpc.register(FlowgraphRpc as never, createRpcHandlers(service, capabilities) as never)
     emitRunUpdated = (payload) => rpcRegistration.events.emit("runUpdated", payload as never)
+
+    // Server-side slash command so API-driven clients (mobile, web) can
+    // discover and invoke the plugin through command.list / session.command.
+    // TUI and GUI keep their own rich navigations; this only replies with text.
+    await ctx.command.transform((editor) => {
+      editor.add({
+        name: "flowgraph",
+        description: "List workflows, start runs, and inspect workflow runs",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          const text = await runServerCommand(service, prompt.text)
+          await ctx.session.synthetic({ sessionID, text, delivery })
+        },
+      })
+    })
 
     const recoveryTimer = setTimeout(() => {
       void service.recover().catch((error) => {
