@@ -54,9 +54,10 @@ the plugin without the TUI or Desktop GUI:
 - `/flowgraph runs` — list runs
 - `/flowgraph graph <runID>` — describe one run
 
-The command replies with plain text in the invoking session. It cannot open
-panels or dialogs; pause, resume, and cancel stay on RPC (`pauseRun`,
-`resumeRun`, `cancelRun`) and the TUI/GUI surfaces.
+The command replies with plain text in the invoking session as a notice that
+does not resume the agent. It cannot open panels or dialogs; pause, resume, and
+cancel stay on RPC (`pauseRun`, `resumeRun`, `cancelRun`) and the TUI/GUI
+surfaces.
 
 ## HTTP
 

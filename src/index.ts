@@ -131,7 +131,9 @@ export default Plugin.define({
         description: "List workflows, start runs, and inspect workflow runs",
         execute: async ({ sessionID, prompt, delivery }) => {
           const text = await runServerCommand(service, prompt.text)
-          await ctx.session.synthetic({ sessionID, text, delivery })
+          // The reply is a transcript notice, not model input. Resuming would
+          // make read-only commands start an unwanted agent turn.
+          await ctx.session.synthetic({ sessionID, text, description: "Flowgraph command", delivery, resume: false })
         },
       })
     })
