@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if ! npm view @alvarolorentedev/opencode-flowgraph version >/dev/null 2>&1; then
-            echo "@alvarolorentedev/opencode-flowgraph is not on npm yet. Complete the first-publish bootstrap in docs/releasing.md." >&2
+            echo "@alvarolorentedev/opencode-flowgraph is not on npm yet. Complete the first-publish bootstrap in docs/development.md." >&2
             exit 1
           fi
           if npm view "@alvarolorentedev/opencode-flowgraph@${PKG_VERSION}" version >/dev/null 2>&1; then
