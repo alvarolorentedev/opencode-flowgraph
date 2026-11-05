@@ -1,11 +1,14 @@
 # opencode-flowgraph
 
+[![npm](https://img.shields.io/npm/v/@alvarolorentedev/opencode-flowgraph)](https://www.npmjs.com/package/@alvarolorentedev/opencode-flowgraph)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **Turn your multi-agent process into a workflow you can run again.**
 
 Define your development loop once — plan, build, review, secure, ship — as a YAML graph. Run it with the OpenCode agents you already have. Every run is durable, inspectable, and steerable from the TUI or Desktop.
 
-[![npm](https://img.shields.io/npm/v/@alvarolorentedev/opencode-flowgraph)](https://www.npmjs.com/package/@alvarolorentedev/opencode-flowgraph)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+<img width="473" height="578" alt="Screenshot 2026-11-05 at 12 32 50" src="https://github.com/user-attachments/assets/c94a1795-a283-432c-ae3a-8f51c38f621e" />
+<img width="375" height="578" alt="Screenshot 2026-11-05 at 12 33 17" src="https://github.com/user-attachments/assets/464fbb78-3d71-4853-a4d7-2c4a439233b6" />
 
 ## What you get
 
