@@ -228,6 +228,29 @@ nodes:
     expect(final.stepCount).toBe(1)
   })
 
+  it("creates each node session with its agent's model, falling back to the default model", async () => {
+    const workflow = `version: 1
+name: sample
+entry: developer
+limits: { max_steps: 2, timeout_seconds: 60 }
+nodes:
+  developer: { agent: developer, next: opus-reviewer }
+  opus-reviewer: { agent: opus-reviewer, next: complete }
+`
+    const { store, native, runner } = setup(() => ({
+      report: { outcome: "done", summary: "done", feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["developer", "opus-reviewer"])
+    const sessions = Array.from(native.sessions.values())
+    const developerSession = sessions.find((session) => session.agent === "developer")
+    const opusSession = sessions.find((session) => session.agent === "opus-reviewer")
+    expect(developerSession?.model).toEqual({ providerID: "test", id: "model" })
+    expect(opusSession?.model).toEqual({ providerID: "anthropic", id: "claude-opus-4" })
+  })
+
   it("blocks an ambiguous active node after restart", async () => {
     const workflow = `version: 1
 name: sample
