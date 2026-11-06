@@ -27,6 +27,7 @@ type SessionState = {
   id: string
   parentID?: string
   agent?: string
+  model?: { providerID: string; id: string; variant?: string }
   outcome?: "succeeded" | "failed" | "interrupted"
   idle?: number
   created: number
@@ -40,6 +41,7 @@ export class FakeNative implements NativeRuntime {
   readonly agents: AgentDescriptor[] = [
     { id: "developer", name: "Developer", mode: "primary", hidden: false },
     { id: "reviewer", name: "Reviewer", mode: "all", hidden: false },
+    { id: "opus-reviewer", name: "Opus Reviewer", mode: "all", hidden: false, model: { providerID: "anthropic", id: "claude-opus-4" } },
   ]
   readonly prompts: PromptLog[] = []
   readonly sessions = new Map<string, SessionState>()
@@ -76,12 +78,19 @@ export class FakeNative implements NativeRuntime {
     return { id }
   }
 
-  async createSession(input: { parentID: string; agent: string; title: string; metadata: Record<string, string> }) {
+  async createSession(input: {
+    parentID: string
+    agent: string
+    title: string
+    metadata: Record<string, string>
+    model?: { providerID: string; id: string; variant?: string }
+  }) {
     const id = `sess_node_${++this.counter}`
     this.sessions.set(id, {
       id,
       parentID: input.parentID,
       agent: input.agent,
+      ...(input.model === undefined ? {} : { model: input.model }),
       created: this.tick(),
       updated: this.now,
       messages: [],
