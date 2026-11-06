@@ -51,6 +51,7 @@ export interface NativeRuntime {
     agent: string
     title: string
     metadata: Record<string, string>
+    model?: { providerID: string; id: string; variant?: string }
   }): Promise<{ id: string }>
   prompt(input: {
     sessionID: string
@@ -121,12 +122,14 @@ export class OpenCodeNativeRuntime implements NativeRuntime {
     agent: string
     title: string
     metadata: Record<string, string>
+    model?: { providerID: string; id: string; variant?: string }
   }): Promise<{ id: string }> {
     const session = await this.ctx.session.create({
       parentID: input.parentID as never,
       agent: Agent.ID.make(input.agent),
       title: input.title,
       metadata: input.metadata,
+      ...(input.model === undefined ? {} : { model: input.model }),
     })
     return { id: session.id }
   }

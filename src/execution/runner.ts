@@ -374,9 +374,10 @@ export class WorkflowRunner {
       })
       return false
     }
-    if (!agent.model) {
-      const fallback = await this.native.getDefaultModel().catch(() => undefined)
-      if (!fallback) {
+    let model = agent.model
+    if (!model) {
+      model = await this.native.getDefaultModel().catch(() => undefined)
+      if (!model) {
         await this.failRun(projectID, run.runID, {
           code: "agent_unavailable",
           message: `agent "${node.agent}" has no model and no default model is configured`,
@@ -410,6 +411,7 @@ export class WorkflowRunner {
         parentID: run.runSessionID,
         agent: node.agent,
         title: `Workflow ${run.workflowID} / ${target} / step ${stepIndex}`,
+        model,
         metadata: {
           plugin: "flowgraph",
           kind: "workflow-node",
