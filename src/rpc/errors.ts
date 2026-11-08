@@ -1,6 +1,6 @@
 import { WorkflowFileError } from "../workflow/loader.js"
 import { StateCorruptionError, RevisionConflictError } from "../state/store.js"
-import { ProjectBusyError } from "../state/concurrency.js"
+import { ProjectBusyError, RunOwnershipError } from "../state/concurrency.js"
 import {
   AmbiguousResumeError,
   NotResumableError,
@@ -55,6 +55,9 @@ export function toRpcError(context: ErrorContext, error: unknown): unknown {
       message: error.message,
       currentRevision: error.currentRevision,
     })
+  }
+  if (error instanceof RunOwnershipError) {
+    return context.error("not_owner", error.message, { message: error.message })
   }
   if (error instanceof ProjectBusyError) {
     return context.error("project_busy", error.message, { message: error.message })

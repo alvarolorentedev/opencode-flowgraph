@@ -52,13 +52,15 @@ Events are live-only. After reconnecting, call `listRuns` or `getRun`.
 | `startRun` | Start a run with an objective and idempotency key |
 | `listRuns` | List project runs |
 | `getRun` | Current state, step summaries, Mermaid, live permissions |
-| `getRunGraph` | Structured graph, run and run-session IDs, active node, node sessions, Mermaid mapping, controls |
+| `getRunGraph` | Structured graph, active steps, blockers, grouped child sessions, Mermaid mapping, controls |
 | `getRunStep` | Full persisted step result |
 | `pauseRun` | Safe pause between nodes |
 | `resumeRun` | Resume, with explicit confirmation for ambiguous retries |
 | `cancelRun` | Cancel future execution and interrupt active work |
 
 Event: `runUpdated` with project, run, workflow, status, current node, revision, timestamp, and blocker. Events are live-only notifications; reconnecting clients must call `getRun` or `listRuns`.
+
+Run details and graphs expose all active steps and blockers. The singular fields remain a primary view for existing callers. Step records from called workflows include `workflowID` and `callPath`.
 
 All methods are location-scoped. The plugin rejects runs that belong to another project or canonical checkout. No `projectID` is accepted from the client.
 
@@ -82,7 +84,7 @@ Declared errors include:
 - `unsafe_path`
 - `stale_revision`
 - `not_owner`
-- `project_busy`
+- `project_busy` (legacy)
 - `idempotency_conflict`
 - `too_many_runs`
 - `permission_pending`
@@ -95,11 +97,11 @@ Error data contains IDs, validation diagnostics, the current revision, or redact
 
 ### Control semantics
 
-- `pauseRun` sets `pausing` while a node is active and `paused` between nodes. It does not interrupt the active node.
+- `pauseRun` sets `pausing` while admitted sessions drain, then sets `paused` with the remaining branches checkpointed.
 - `resumeRun` requires the current `expectedRevision`.
-- `resumeRun` on a permission-blocked node returns `permission_pending` until the native decision is made.
-- `resumeRun` on an ambiguous node requires `confirmRetry: true`.
-- `cancelRun` interrupts the active node where supported and marks the run cancelled.
+- `resumeRun` returns `permission_pending` while a native permission request is outstanding.
+- `resumeRun` requires `confirmRetry: true` to retry ambiguous steps. Other branches retain their checkpoints and live sessions.
+- `cancelRun` marks the run cancelled and requests interruption of every outstanding session in that run.
 - An idempotent retry with the same `requestID` returns the current run.
 - `startRun` uses `requestID` plus the workflow/objective hash to detect conflicting retries.
 
@@ -148,7 +150,7 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
 - Outcome labels sit on their own row, or beside a vertical edge, so lines stay unbroken.
 - Nodes with completed (green), active (yellow), failed or routed-back (red), paused, and pending markers and colours.
 - Outcome-labelled edges, including cycles and terminal edges.
-- The active node is highlighted and pulses while the panel is visible.
+- Active nodes are highlighted. Called workflows show child progress under their call nodes.
 
 The TUI does not render Mermaid. It renders the structured graph from `getRunGraph` directly. If the diagram does not fit the available width or height, the page falls back to a compact text list and says why.
 
@@ -160,7 +162,9 @@ Workflow page:
 |---|---|
 | `up` / `down` | Select a run |
 | `o` | Open the selected run's session with its graph panel |
-| `enter` | Open the active node's native session |
+| `enter` | Open the primary active session |
+| `s` | Pick any workflow session, grouped by graph node |
+| `u` | Resume or retry ambiguous steps while siblings run |
 | `p` | Pause or resume |
 | `c` | Cancel the run |
 | `r` | Refresh |
@@ -169,7 +173,9 @@ Session panel:
 
 | Key | Action |
 |---|---|
-| `enter` | Open the active node's native session |
+| `enter` | Open the primary active session |
+| `s` | Pick any workflow session, grouped by graph node |
+| `u` | Resume or retry ambiguous steps while siblings run |
 | `p` | Pause or resume |
 | `c` | Cancel the run |
 | `r` | Refresh |
@@ -191,8 +197,8 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 ### What it shows
 
 - The generated Mermaid graph.
-- The active node highlighted.
-- Completed nodes styled green, nodes whose latest route looped back red until a later attempt passes, the active node yellow, and failed/paused/pending nodes styled by state.
+- Active nodes highlighted and child sessions grouped under their call nodes.
+- Completed nodes styled green, nodes whose latest route looped back red until a later attempt passes, active nodes yellow, and failed/paused/pending nodes styled by state.
 - Run status, revision, failure reason, blocker, and pending permission count.
 - Click a node to open its native session. A node without a session shows a toast instead.
 - Buttons for changing runs, pause, resume, cancel, and graph zoom.

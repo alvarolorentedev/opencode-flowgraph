@@ -4,7 +4,7 @@ This guide covers the two files you own: native OpenCode agents and the workflow
 
 ## Agent requirements
 
-Workflow nodes reference native OpenCode agent IDs from `.opencode/agents/*.md`. Agents must be:
+Agent nodes reference native OpenCode agent IDs from `.opencode/agents/*.md`. Agents must be:
 
 - Not hidden
 - `mode: primary` or `mode: all`
@@ -73,13 +73,34 @@ nodes:
 - `version` must be `1`.
 - `name` and every node ID are lowercase slugs.
 - `entry` must be a node ID.
-- A node defines exactly one of `next` or `routes`.
+- An agent node defines exactly one of `next` or `routes`.
 - `next` is unconditional.
 - `routes` maps structured outcomes to targets.
 - `complete` and `pause` are reserved terminal targets.
 - Every node must be reachable from `entry`.
 - Cycles are supported; `max_steps` and `max_repeat_transitions` bound them.
 - Unknown fields, duplicate YAML keys, aliases, merge keys, custom tags, and oversized files are rejected.
+
+### Parallel branches and workflow calls
+
+A fork declares 2–16 distinct branch entry nodes and a join. The join is an agent node dedicated to that fork. It runs once after every branch reaches it and receives the last result from each branch in declaration order. Branches may contain routes, loops, and nested forks. Each branch has its own nodes until the join, and every branch node needs a path to the join.
+
+A call references a workflow in the same repository by its YAML name. Map both child terminal outcomes, `complete` and `pause`, to caller targets. The child receives the parent's objective and recent results. Its final result passes back to the caller. Child steps, permissions, and failures are part of the same run.
+
+```yaml
+nodes:
+  dispatch: { fork: [security, verification], join: integrate }
+  security: { agent: security, next: integrate }
+  verification:
+    workflow: review
+    routes: { complete: integrate, pause: investigate }
+  investigate: { agent: reviewer, next: integrate }
+  integrate: { agent: reviewer, next: complete }
+```
+
+The parent supplies the overall step, wall-clock, and recovery budgets. Each workflow supplies its own node timeout, report retry count, and repeated-transition limit. Forks and calls themselves consume no steps. The combined YAML sources must fit within 256 KiB, and workflow references must be acyclic.
+
+Parallel branches and runs in the same checkout share files. Coordinate writes when agents can edit the same paths.
 
 ### Limits
 
@@ -125,3 +146,4 @@ Runnable examples live in [`examples/.opencode`](../examples/.opencode):
 - `workflows/development.yaml` — development, review, and security loop
 - `workflows/review.yaml` — a smaller two-stage review loop
 - `workflows/product-delivery.yaml` — product, design, build, and review flow
+- `workflows/parallel-review.yaml` — parallel security and review branches with a workflow call and a join

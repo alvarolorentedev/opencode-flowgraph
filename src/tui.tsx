@@ -233,7 +233,7 @@ function WorkflowGraph(props: {
   const activeSession = () => {
     const current = graph()
     if (!current?.activeNode) return undefined
-    return current.nodes.find((node) => node.nodeID === current.activeNode)?.sessionIDs.at(-1)
+    return current.activeSteps?.[0]?.sessionID ?? current.nodes.find((node) => node.nodeID === current.activeNode)?.sessionIDs.at(-1)
   }
 
   const openActive = () => {
@@ -243,6 +243,21 @@ function WorkflowGraph(props: {
       return
     }
     context.ui.router.navigate({ type: "session", sessionID })
+  }
+
+  const pickSession = async () => {
+    const current = graph()
+    if (!current) return
+    const options = current.nodes.flatMap((node) => node.childSteps
+      ? node.childSteps.map((step) => ({
+          title: `${node.label} / ${step.callPath?.slice(1).concat(step.nodeID).join(" / ") ?? step.nodeID}`,
+          description: `${step.workflowID} · step ${step.seq} · ${step.status}`,
+          value: step.sessionID,
+        }))
+      : node.sessionIDs.map((value, index) => ({ title: node.label, description: `Session ${index + 1}`, value })))
+    if (options.length === 0) return
+    const sessionID = await context.ui.dialog.select<string>({ title: "Workflow sessions", options })
+    if (sessionID) context.ui.router.navigate({ type: "session", sessionID })
   }
 
   const pause = async () => {
@@ -263,11 +278,11 @@ function WorkflowGraph(props: {
     const current = graph()
     const source = props.source()
     if (!current || !source) return
-    const confirm = current.status === "blocked"
+    const confirm = current.blockers?.some((blocker) => blocker.type !== "permission") ?? current.status === "blocked"
     if (confirm) {
       const ok = await context.ui.dialog.confirm({
-        title: "Retry workflow node?",
-        message: "The active node is ambiguous. Retrying may repeat work. Continue?",
+        title: "Retry ambiguous workflow steps?",
+        message: "Retrying ambiguous steps may repeat work.",
         label: { confirm: "Retry", cancel: "Cancel" },
       })
       if (!ok) return
@@ -288,7 +303,7 @@ function WorkflowGraph(props: {
     if (!current || !source) return
     const ok = await context.ui.dialog.confirm({
       title: "Cancel workflow run?",
-      message: "Future nodes will not execute. The active node may be interrupted.",
+      message: "Active sessions will receive an interrupt request.",
       label: { confirm: "Cancel run", cancel: "Keep running" },
     })
     if (!ok) return
@@ -332,6 +347,18 @@ function WorkflowGraph(props: {
           if (current.status === "paused" || current.status === "blocked") void resume()
           else void pause()
         },
+      },
+      {
+        id: `flowgraph.${props.id}.sessions`,
+        title: "Choose a workflow session",
+        bind: "s",
+        run: () => void pickSession(),
+      },
+      {
+        id: `flowgraph.${props.id}.resume`,
+        title: "Resume workflow or retry ambiguous steps",
+        bind: "u",
+        run: () => { if (graph()?.controls.canResume) void resume() },
       },
       {
         id: `flowgraph.${props.id}.cancel`,
@@ -392,7 +419,7 @@ function WorkflowGraph(props: {
         return (
           <box flexDirection="column">
             <text fg={color(node)}>
-              {nodeMarker(node)} {node.label} ({node.agent}) · {node.stepCount} step(s)
+              {nodeMarker(node)} {node.label} {node.agent ? `(${node.agent})` : node.workflow ? `(${node.workflow})` : `(join at ${node.join})`} · {node.stepCount} step(s)
               {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
             </text>
             {edges.map((edge) => (
@@ -409,7 +436,7 @@ function WorkflowGraph(props: {
 
   const renderGraph = (value: RunGraphOutput) => {
     const completed = value.nodes.filter((node) => node.state === "completed").length
-    const blocker = value.blocker
+    const blockers = value.blockers ?? (value.blocker ? [value.blocker] : [])
     const failure = value.failure
     let diagram: ReturnType<typeof renderRunGraphDiagram>
     try {
@@ -428,9 +455,9 @@ function WorkflowGraph(props: {
         <text fg={context.theme.text.muted}>
           Run {value.runID} · revision {value.revision}
         </text>
-        {blocker ? (
+        {blockers.map((blocker) => (
           <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker.message}</text>
-        ) : null}
+        ))}
         {failure ? (
           <text fg={context.theme.text.feedback.error.base}>
             Failed: {failure.code} — {failure.message}
@@ -459,9 +486,17 @@ function WorkflowGraph(props: {
             ))}
           </box>
         )}
+        {value.nodes.filter((node) => node.childSteps?.length).map((node) => {
+          const steps = node.childSteps!
+          const active = steps.filter((step) => step.status === "running").map((step) => step.nodeID)
+          return <text fg={context.theme.text.muted}>
+            {node.label} · {steps.filter((step) => step.status === "completed").length}/{steps.length} child steps completed
+            {active.length > 0 ? ` · active: ${active.join(", ")}` : ""}
+          </text>
+        })}
         <text> </text>
         <text fg={context.theme.text.faint}>
-          enter open active session · p pause/resume · c cancel · r refresh
+          enter active session · s all sessions · p pause/resume · u retry · c cancel · r refresh
         </text>
       </box>
     )

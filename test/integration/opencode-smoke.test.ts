@@ -36,24 +36,36 @@ describe.skipIf(!enabled)("OpenCode V2 plugin loading and RPC smoke test", () =>
         "---\ndescription: Reviewer\nmode: primary\n---\nReview the work.\n",
       )
       await fs.writeFile(
+        path.join(dir, ".opencode", "workflows", "checks.yaml"),
+        `version: 1
+name: checks
+entry: review
+limits: { max_steps: 1 }
+nodes:
+  review: { agent: reviewer, routes: { approved: complete, blocked: pause } }
+`,
+      )
+      await fs.writeFile(
         path.join(dir, ".opencode", "workflows", "sample.yaml"),
         `version: 1
 name: sample
-entry: developer
+entry: dispatch
 limits: { max_steps: 4, timeout_seconds: 60 }
 nodes:
-  developer: { agent: developer, next: reviewer }
-  reviewer:
-    agent: reviewer
-    routes: { approved: complete, changes_requested: developer, blocked: pause }
+  dispatch: { fork: [developer, check], join: integrate }
+  developer: { agent: developer, next: integrate }
+  check: { workflow: checks, routes: { complete: integrate, pause: integrate } }
+  integrate: { agent: reviewer, next: complete }
 `,
       )
 
       const capabilities = (await api(dir, "post", "/api/rpc/flowgraph/capabilities", '{"input":{}}')) as {
-        output: { rpc: { id: string }; features: { structuredResults: string } }
+        output: { rpc: { id: string }; features: { structuredResults: string; parallelBranches: boolean; nestedWorkflows: boolean } }
       }
       expect(capabilities.output.rpc.id).toBe("flowgraph")
-      expect(capabilities.output.features.structuredResults).toBe("tool")
+      expect(capabilities.output.features).toMatchObject({
+        structuredResults: "tool", parallelBranches: true, nestedWorkflows: true,
+      })
 
       const workflows = (await api(dir, "post", "/api/rpc/flowgraph/listWorkflows", '{"input":{}}')) as {
         output: { workflows: Array<{ id: string; valid: boolean }> }
@@ -68,6 +80,7 @@ nodes:
       )) as { output: { valid: boolean; mermaid: string; definition?: { name: string } } }
       expect(workflow.output.valid).toBe(true)
       expect(workflow.output.mermaid).toContain("flowchart TD")
+      expect(workflow.output.mermaid).toContain("Check (checks)")
       expect(workflow.output.definition?.name).toBe("sample")
 
       const saved = (await api(

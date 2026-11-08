@@ -45,23 +45,19 @@ export function zeroUsage(): UsageEstimate {
   }
 }
 
-export function addUsage(
-  base: UsageEstimate,
-  session: {
-    cost: number
-    tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
-  },
-): UsageEstimate {
+export function addUsage(base: UsageEstimate, session: Parameters<typeof usageFromSession>[0]): UsageEstimate {
+  return mergeUsage(base, usageFromSession(session))
+}
+
+export function mergeUsage(base: UsageEstimate, extra: UsageEstimate): UsageEstimate {
   return {
-    input: base.input + (session.tokens.input ?? 0),
-    output: base.output + (session.tokens.output ?? 0),
-    reasoning: base.reasoning + (session.tokens.reasoning ?? 0),
-    cacheRead: base.cacheRead + (session.tokens.cache.read ?? 0),
-    cacheWrite: base.cacheWrite + (session.tokens.cache.write ?? 0),
-    costUSD: base.costUSD + (session.cost ?? 0),
-    estimated: true,
-    enforced: false,
-    source: "provider_reported",
+    ...base,
+    input: base.input + extra.input,
+    output: base.output + extra.output,
+    reasoning: base.reasoning + extra.reasoning,
+    cacheRead: base.cacheRead + extra.cacheRead,
+    cacheWrite: base.cacheWrite + extra.cacheWrite,
+    costUSD: base.costUSD + extra.costUSD,
   }
 }
 
@@ -69,7 +65,15 @@ export function usageFromSession(session: {
   cost: number
   tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
 }): UsageEstimate {
-  return addUsage(zeroUsage(), session)
+  return {
+    ...zeroUsage(),
+    input: session.tokens.input ?? 0,
+    output: session.tokens.output ?? 0,
+    reasoning: session.tokens.reasoning ?? 0,
+    cacheRead: session.tokens.cache.read ?? 0,
+    cacheWrite: session.tokens.cache.write ?? 0,
+    costUSD: session.cost ?? 0,
+  }
 }
 
 export function assertValidOutcome(graph: WorkflowGraph, nodeID: string, result: NodeResult): void {

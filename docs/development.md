@@ -26,9 +26,10 @@
 | `ui/graph.ts` | Pure boxed terminal diagram: ranking, rails, tones, width/height fallback |
 | `tui.tsx` | TUI workflow page, session panel, command, keyboard controls |
 | `gui.tsx` | Experimental Desktop GUI run picker, panel, and Mermaid renderer |
-| `execution/runner.ts` | Explicit run state machine, polling, limits, pause/resume/cancel, recovery |
+| `execution/runner.ts` | Concurrent session scheduler, controls, limits, and recovery |
+| `execution/checkpoint.ts` | Durable branch, call, and join transitions |
 | `state/store.ts` | Project-scoped records with revisioned run mutations |
-| `state/concurrency.ts` | Host-local project lock and busy detection |
+| `state/concurrency.ts` | Host-local run ownership lock |
 | `service.ts` | Workflow discovery/validation and run control facade |
 | `rpc.ts` | Shared `Rpc.define` contract |
 | `contract.ts` | Shared Zod schemas and exported types |

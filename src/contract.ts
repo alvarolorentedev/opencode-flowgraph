@@ -4,12 +4,16 @@ import type { WorkflowDefinition } from "./workflow/schema.js"
 import type { WorkflowGraph } from "./workflow/graph.js"
 import type { AgentResolution } from "./workflow/validator.js"
 import {
+  ActiveStepSchema,
+  BlockerSchema,
   FailureInfoSchema,
+  MAX_RUN_PERMISSIONS,
   PermissionSummarySchema,
   RunDetailSchema,
   RunStatusSchema,
   RunSummarySchema,
   StepRecordSchema,
+  StepSummarySchema,
 } from "./state/types.js"
 
 export const DiagnosticSchema = z
@@ -112,7 +116,10 @@ export const RunGraphNodeSchema = z
   .object({
     nodeID: z.string().min(1).max(64),
     label: z.string().min(1).max(200),
-    agent: z.string().min(1).max(128),
+    agent: z.string().min(1).max(128).optional(),
+    workflow: WorkflowIdSchema.optional(),
+    join: z.string().max(64).optional(),
+    childSteps: z.array(StepSummarySchema).max(500).optional(),
     state: RunGraphNodeStateSchema,
     routedBack: z.boolean().optional(),
     sessionIDs: z.array(z.string().min(1).max(128)).max(500),
@@ -124,7 +131,7 @@ export const RunGraphEdgeSchema = z
     from: z.string().min(1).max(64),
     to: z.string().min(1).max(64),
     outcome: z.string().min(1).max(32).optional(),
-    kind: z.enum(["next", "route"]),
+    kind: z.enum(["next", "route", "fork"]),
     terminal: z.boolean(),
   })
   .strict()
@@ -136,6 +143,8 @@ export const RunGraphOutputSchema = z
     status: RunStatusSchema,
     runSessionID: z.string().min(1).max(128).nullable(),
     activeNode: z.string().max(64).nullable(),
+    activeSteps: z.array(ActiveStepSchema).max(500).optional(),
+    blockers: z.array(BlockerSchema).max(500).optional(),
     currentNode: z.string().max(64).nullable(),
     nodes: z.array(RunGraphNodeSchema).max(200),
     edges: z.array(RunGraphEdgeSchema).max(3200),
@@ -143,7 +152,7 @@ export const RunGraphOutputSchema = z
     mermaidNodes: z.array(z.object({ nodeID: z.string().max(64), mermaidID: z.string().max(64) }).strict()).max(200),
     activeMermaidID: z.string().max(64).nullable(),
     controls: z.object({ canPause: z.boolean(), canResume: z.boolean(), canCancel: z.boolean() }).strict(),
-    pendingPermissions: z.array(PermissionSummarySchema).max(50),
+    pendingPermissions: z.array(PermissionSummarySchema).max(MAX_RUN_PERMISSIONS),
     blocker: z
       .object({ type: z.string().max(80), message: z.string().max(1_000) })
       .strict()
@@ -206,8 +215,8 @@ export const CapabilitiesOutputSchema = z
         structuredResults: z.literal("tool"),
         conservativeRecovery: z.literal(true),
         runGraph: z.literal(true),
-        parallelBranches: z.literal(false),
-        nestedWorkflows: z.literal(false),
+        parallelBranches: z.boolean(),
+        nestedWorkflows: z.boolean(),
         backgroundNativeWork: z.literal(false),
       })
       .strict(),

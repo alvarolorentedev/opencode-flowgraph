@@ -7,7 +7,7 @@ export type Diagnostic = {
 }
 
 export type GraphEdge = {
-  kind: "next" | "route"
+  kind: "next" | "route" | "fork"
   outcome?: string
   target: string
   terminal: boolean
@@ -15,7 +15,9 @@ export type GraphEdge = {
 
 export type GraphNode = {
   id: string
-  agent: string
+  agent?: string
+  join?: string
+  workflow?: string
   label: string
   edges: GraphEdge[]
 }
@@ -42,13 +44,14 @@ export function buildGraph(workflow: WorkflowDefinition): WorkflowGraph {
 
   for (const [id, node] of Object.entries(workflow.nodes)) {
     const edges: GraphEdge[] = []
-    if (node.next !== undefined) {
+    if ("fork" in node) {
+      for (const target of node.fork) edges.push({ kind: "fork", target, terminal: false })
+    } else if ("next" in node && node.next !== undefined) {
       const terminal = isTerminal(node.next)
       if (terminal) terminals[node.next as Terminal] = true
       edges.push({ kind: "next", target: node.next, terminal })
-    } else if (node.routes !== undefined) {
-      for (const outcome of Object.keys(node.routes).sort()) {
-        const target = node.routes[outcome]!
+    } else {
+      for (const [outcome, target] of Object.entries(node.routes ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
         const terminal = isTerminal(target)
         if (terminal) terminals[target as Terminal] = true
         edges.push({ kind: "route", outcome, target, terminal })
@@ -56,7 +59,7 @@ export function buildGraph(workflow: WorkflowDefinition): WorkflowGraph {
     }
     nodes[id] = {
       id,
-      agent: node.agent,
+      ...("agent" in node ? { agent: node.agent } : "fork" in node ? { join: node.join } : { workflow: node.workflow }),
       label: node.label ?? humanizeNodeId(id),
       edges,
     }
@@ -70,7 +73,7 @@ export function reachableNodes(graph: WorkflowGraph): Set<string> {
   const queue = [graph.entry]
   while (queue.length > 0) {
     const id = queue.shift()!
-    if (seen.has(id) || !graph.nodes[id]) continue
+    if (seen.has(id) || !Object.hasOwn(graph.nodes, id)) continue
     seen.add(id)
     for (const edge of graph.nodes[id]!.edges) {
       if (!edge.terminal) queue.push(edge.target)
@@ -85,7 +88,7 @@ export function terminalReachable(graph: WorkflowGraph): Set<Terminal> {
   const queue = [graph.entry]
   while (queue.length > 0) {
     const id = queue.shift()!
-    if (seen.has(id) || !graph.nodes[id]) continue
+    if (seen.has(id) || !Object.hasOwn(graph.nodes, id)) continue
     seen.add(id)
     for (const edge of graph.nodes[id]!.edges) {
       if (edge.terminal) reachable.add(edge.target as Terminal)
@@ -102,7 +105,7 @@ export function validateGraph(workflow: WorkflowDefinition, graph: WorkflowGraph
   const errors: Diagnostic[] = []
   const warnings: string[] = []
 
-  if (!workflow.nodes[workflow.entry]) {
+  if (!Object.hasOwn(workflow.nodes, workflow.entry)) {
     errors.push({ path: "entry", message: `entry node "${workflow.entry}" does not exist`, code: "missing_entry" })
   }
 
@@ -112,23 +115,20 @@ export function validateGraph(workflow: WorkflowDefinition, graph: WorkflowGraph
     }
   }
 
-  for (const [id, node] of Object.entries(workflow.nodes)) {
-    const targets =
-      node.next !== undefined ? [node.next] : Object.entries(node.routes ?? {}).map(([outcome, target]) => ({ outcome, target }))
-    for (const item of targets) {
-      const target = typeof item === "string" ? item : item.target
-      const outcome = typeof item === "string" ? undefined : item.outcome
-      if (!isTerminal(target) && !workflow.nodes[target]) {
+  for (const node of Object.values(graph.nodes)) {
+    for (const [index, edge] of node.edges.entries()) {
+      if (!edge.terminal && !Object.hasOwn(graph.nodes, edge.target)) {
         errors.push({
-          path: outcome === undefined ? `nodes.${id}.next` : `nodes.${id}.routes.${outcome}`,
-          message: `transition target "${target}" is neither a node nor a terminal`,
+          path: `nodes.${node.id}.${edge.kind === "route" ? `routes.${edge.outcome}` : edge.kind === "fork" ? `fork.${index}` : "next"}`,
+          message: `transition target "${edge.target}" is neither a node nor a terminal`,
           code: "invalid_target",
         })
       }
     }
   }
+  errors.push(...validateForks(graph))
 
-  if (workflow.nodes[workflow.entry]) {
+  if (Object.hasOwn(workflow.nodes, workflow.entry)) {
     const reachable = reachableNodes(graph)
     for (const id of Object.keys(workflow.nodes)) {
       if (!reachable.has(id)) {
@@ -145,6 +145,68 @@ export function validateGraph(workflow: WorkflowDefinition, graph: WorkflowGraph
   return { errors, warnings }
 }
 
+function validateForks(graph: WorkflowGraph): Diagnostic[] {
+  const errors: Diagnostic[] = []
+  const incoming = new Map<string, string[]>()
+  const joins = new Set<string>()
+  for (const node of Object.values(graph.nodes)) {
+    for (const { target } of node.edges) {
+      const sources = incoming.get(target) ?? []
+      sources.push(node.id)
+      incoming.set(target, sources)
+    }
+  }
+
+  for (const fork of Object.values(graph.nodes)) {
+    const join = fork.join
+    if (join === undefined) continue
+    const invalid = (message: string) => errors.push({ path: `nodes.${fork.id}.join`, message, code: "invalid_join" })
+    if (!graph.nodes[join]?.agent || isTerminal(join) || joins.has(join) || join === graph.entry) {
+      invalid(`join "${join}" must be a distinct agent node dedicated to this fork`)
+      continue
+    }
+    joins.add(join)
+    const members = new Set<string>()
+    for (const { target: entry } of fork.edges) {
+      const branch = new Set<string>()
+      const queue = [entry]
+      let exits = entry === join
+      for (const id of queue) {
+        if (id === join || branch.has(id)) continue
+        if (!Object.hasOwn(graph.nodes, id) || isTerminal(id) || id === fork.id) {
+          exits = true
+          continue
+        }
+        branch.add(id)
+        queue.push(...graph.nodes[id]!.edges.map((edge) => edge.target))
+      }
+      const reachesJoin = new Set([join])
+      const reverse = [join]
+      for (const id of reverse) {
+        for (const source of incoming.get(id) ?? []) {
+          if (!branch.has(source) || reachesJoin.has(source)) continue
+          reachesJoin.add(source)
+          reverse.push(source)
+        }
+      }
+      if (exits || reachesJoin.size !== branch.size + 1) {
+        invalid(`branch "${entry}" must reach "${join}" without leaving the fork`)
+      }
+      const overlap = [...branch].find((id) => members.has(id))
+      if (overlap) invalid(`branches overlap at "${overlap}" before "${join}"`)
+      const bypass = [...branch].find((id) => id === graph.entry ||
+        (incoming.get(id) ?? []).some((source) => !branch.has(source) && (source !== fork.id || id !== entry)),
+      )
+      if (bypass) invalid(`an edge enters branch "${entry}" at "${bypass}" without passing through its fork`)
+      for (const id of branch) members.add(id)
+    }
+    if ((incoming.get(join) ?? []).some((source) => !members.has(source))) {
+      invalid(`an edge enters join "${join}" outside its branches`)
+    }
+  }
+  return errors
+}
+
 export class TransitionError extends Error {
   constructor(
     readonly nodeId: string,
@@ -157,7 +219,7 @@ export class TransitionError extends Error {
 }
 
 export function resolveTransition(graph: WorkflowGraph, nodeId: string, outcome?: string): string {
-  const node = graph.nodes[nodeId]
+  const node = Object.hasOwn(graph.nodes, nodeId) ? graph.nodes[nodeId] : undefined
   if (!node) throw new TransitionError(nodeId, outcome, `unknown node "${nodeId}"`)
   if (node.edges.length === 1 && node.edges[0]!.kind === "next") return node.edges[0]!.target
   if (outcome === undefined) {
@@ -176,7 +238,7 @@ export function resolveTransition(graph: WorkflowGraph, nodeId: string, outcome?
 }
 
 export function validOutcomes(graph: WorkflowGraph, nodeId: string): string[] {
-  const node = graph.nodes[nodeId]
+  const node = Object.hasOwn(graph.nodes, nodeId) ? graph.nodes[nodeId] : undefined
   if (!node) return []
   return node.edges.filter((edge) => edge.kind === "route").map((edge) => edge.outcome!).sort()
 }

@@ -22,6 +22,7 @@ export type NodePromptInput = {
   nodeSessionID: string
   previousSessions: string[]
   previous: PromptPreviousResult[]
+  joined?: boolean
 }
 
 export function truncateUtf8(value: string, maxBytes: number): string {
@@ -42,14 +43,14 @@ function safeBlock(value: string, tag: string): string {
 
 export function buildNodePrompt(input: NodePromptInput): string {
   const node = input.workflow.nodes[input.nodeID]
-  if (!node) throw new Error(`node "${input.nodeID}" is not in the workflow snapshot`)
+  if (!node || !("agent" in node)) throw new Error(`node "${input.nodeID}" is not in the workflow snapshot`)
   const outcomes = validOutcomes(input.graph, input.nodeID)
   const objective = safeBlock(truncateUtf8(input.objective, HARD_LIMITS.maxObjectiveBytes), "objective")
-  const previous = input.previous
-    .slice(-3)
+  const handoffBytes = input.joined ? 256 : HARD_LIMITS.maxTextResultBytes
+  const previous = (input.joined ? input.previous : input.previous.slice(-3))
     .map((item) => {
-      const summary = safeBlock(truncateUtf8(item.summary, HARD_LIMITS.maxTextResultBytes), "result")
-      const feedback = safeBlock(truncateUtf8(item.feedback, HARD_LIMITS.maxTextResultBytes), "result")
+      const summary = safeBlock(truncateUtf8(item.summary, handoffBytes), "result")
+      const feedback = safeBlock(truncateUtf8(item.feedback, handoffBytes), "result")
       return [
         `<result node="${item.nodeID}" outcome="${item.outcome ?? "unknown"}">`,
         `<summary>${summary}</summary>`,

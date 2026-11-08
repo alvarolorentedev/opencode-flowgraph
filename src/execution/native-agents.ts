@@ -59,7 +59,6 @@ export interface NativeRuntime {
     text: string
     metadata?: Record<string, string>
   }): Promise<{ id: string }>
-  wait(sessionID: string, signal: AbortSignal): Promise<void>
   interrupt(sessionID: string): Promise<boolean>
   getSession(sessionID: string): Promise<SessionSnapshot>
   getContext(sessionID: string): Promise<SessionMessage[]>
@@ -154,10 +153,6 @@ export class OpenCodeNativeRuntime implements NativeRuntime {
     return { id: admitted.id }
   }
 
-  async wait(sessionID: string, signal: AbortSignal): Promise<void> {
-    await this.ctx.session.wait({ sessionID: sessionID as never }, { signal })
-  }
-
   async interrupt(sessionID: string): Promise<boolean> {
     const result = await this.ctx.session.interrupt({ sessionID: sessionID as never, resume: false })
     return result.interrupted
@@ -187,7 +182,10 @@ export class OpenCodeNativeRuntime implements NativeRuntime {
 
   async getContext(sessionID: string): Promise<SessionMessage[]> {
     const messages = await this.ctx.session.context({ sessionID: sessionID as never })
-    return messages as unknown as SessionMessage[]
+    return (messages as unknown as SessionMessage[]).map((message) => ({
+      ...message,
+      time: { ...message.time, created: epoch(message.time?.created) },
+    }))
   }
 
   async listPermissions(sessionID: string): Promise<PermissionSummary[]> {

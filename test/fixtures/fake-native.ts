@@ -33,6 +33,7 @@ type SessionState = {
   created: number
   updated: number
   messages: SessionMessage[]
+  timer?: ReturnType<typeof setTimeout>
   behavior?: Behavior
   metadata?: Record<string, string>
 }
@@ -123,13 +124,14 @@ export class FakeNative implements NativeRuntime {
     }
     const delay = behavior.delayMs ?? 0
     if (delay === 0) this.finish(input.sessionID, input.metadata ?? {})
-    else setTimeout(() => this.finish(input.sessionID, input.metadata ?? {}), delay)
+    else session.timer = setTimeout(() => this.finish(input.sessionID, input.metadata ?? {}), delay)
     return { id: input.messageID }
   }
 
   private finish(sessionID: string, metadata: Record<string, string>) {
     const session = this.sessions.get(sessionID)
     if (!session) return
+    clearTimeout(session.timer)
     const meta = { ...(session.metadata ?? {}), ...metadata }
     const behavior = session.behavior ?? {}
     const outcome = behavior.outcome ?? "succeeded"
@@ -164,13 +166,10 @@ export class FakeNative implements NativeRuntime {
     this.finish(sessionID, session?.metadata ?? {})
   }
 
-  async wait() {
-    await new Promise((resolve) => setTimeout(resolve, 2))
-  }
-
   async interrupt(sessionID: string) {
     const session = this.sessions.get(sessionID)
-    if (!session) return false
+    if (!session || session.messages.at(-1)?.type === "idle") return false
+    clearTimeout(session.timer)
     session.outcome = "interrupted"
     session.idle = this.tick()
     this.permissions.delete(sessionID)

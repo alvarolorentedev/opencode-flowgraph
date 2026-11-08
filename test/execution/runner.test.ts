@@ -1,33 +1,45 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { WorkflowStore } from "../../src/state/store.js"
-import { ProjectLockManager } from "../../src/state/concurrency.js"
+import { RunLockManager } from "../../src/state/concurrency.js"
 import { createInvocationRegistry } from "../../src/execution/report-tool.js"
 import { WorkflowRunner, type RunUpdatedPayload } from "../../src/execution/runner.js"
 import { FakeNative, type Behavior } from "../fixtures/fake-native.js"
 import { MemoryStorage, makeRunRecord, source, waitForRun } from "../fixtures/memory.js"
 import { parseWorkflowSource } from "../../src/workflow/loader.js"
 import { RunRecordSchema, type RunRecord } from "../../src/state/types.js"
+import { activeSteps } from "../../src/execution/checkpoint.js"
+import { buildRunGraph } from "../../src/execution/run-graph.js"
 import { zeroUsage } from "../../src/execution/results.js"
+
+const runners: WorkflowRunner[] = []
+afterEach(async () => {
+  await Promise.all(runners.splice(0).map((runner) => runner.shutdown()))
+})
 
 function setup(scenario: (input: { nodeID: string; agent: string }, callIndex: number) => Behavior) {
   const storage = new MemoryStorage()
   const store = new WorkflowStore(storage)
   const native = new FakeNative(store, "prj_1", (log, index) => scenario(log, index))
-  const locks = new ProjectLockManager()
+  const locks = new RunLockManager()
   const invocations = createInvocationRegistry()
   const events: RunUpdatedPayload[] = []
-  const runner = new WorkflowRunner({
-    store,
-    native,
-    locks,
-    invocations,
-    emit: async (event) => {
-      events.push(event)
-    },
-    now: () => 2_000,
-    options: { pollIntervalMs: 5, recoveryGraceMs: 50 },
-  })
-  return { storage, store, native, locks, invocations, runner, events }
+  const newRunner = () => {
+    const runner = new WorkflowRunner({
+      store,
+      native,
+      locks,
+      invocations,
+      emit: async (event) => {
+        events.push(event)
+      },
+      now: () => 2_000,
+      options: { pollIntervalMs: 5, recoveryGraceMs: 50 },
+    })
+    runners.push(runner)
+    return runner
+  }
+  const runner = newRunner()
+  return { storage, store, native, locks, invocations, runner, newRunner, events }
 }
 
 async function createRun(
@@ -321,4 +333,177 @@ nodes:
     const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "blocked")
     expect(final.blocker?.type).toBe("ambiguous_node")
   })
+})
+
+const parallel = `version: 1
+name: sample
+entry: dispatch
+limits: { max_steps: 12 }
+nodes:
+  dispatch: { fork: [left, right], join: merge }
+  left: { agent: developer, next: merge }
+  right: { agent: reviewer, next: followup }
+  followup: { agent: reviewer, next: merge }
+  merge:
+    agent: developer
+    routes: { again: dispatch, done: complete }
+`
+
+describe("parallel workflow checkpoints", () => {
+  it("runs overlapping sessions, lets a sibling progress while blocked, and joins once per fork invocation", async () => {
+    const { store, native, runner } = setup(({ nodeID }, count) => ({
+      pendingPermission: count === 1 && (nodeID === "left" || nodeID === "right"),
+      report: { outcome: nodeID === "merge" && count === 1 ? "again" : "done", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, parallel)
+    await runner.start("prj_1", run.runID)
+    const waiting = await waitForRun(store, "prj_1", run.runID, (item) => item.pendingPermissions.length === 2)
+    const steps = activeSteps(waiting)
+    expect(steps.map((step) => step.nodeID)).toEqual(["left", "right"])
+    expect(buildRunGraph(waiting).nodes.filter((node) => node.state === "active").map((node) => node.nodeID)).toEqual(["left", "right"])
+    native.release(steps[1]!.sessionID)
+
+    const arrived = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "blocked" && item.steps.some((step) => step.nodeID === "followup"))
+    expect(arrived.steps.map((step) => step.nodeID)).toEqual(["right", "followup"])
+    expect(native.prompts.some((prompt) => prompt.nodeID === "merge")).toBe(false)
+    native.release(steps[0]!.sessionID)
+
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    const joins = native.prompts.filter((prompt) => prompt.nodeID === "merge")
+    expect(joins).toHaveLength(2)
+    expect(joins[0]!.text).toMatch(/<summary>left<\/summary>[\s\S]*<summary>followup<\/summary>/)
+    expect(native.prompts.find((prompt) => prompt.nodeID === "followup")!.text).not.toContain("<summary>left</summary>")
+    expect(final.stepCount).toBe(8)
+    expect(new Set(final.steps.map((step) => step.stepID)).size).toBe(8)
+  })
+
+  it("restores a partial join after restart without admitting completed steps again", async () => {
+    const { store, native, runner, newRunner } = setup(({ nodeID }) => ({
+      pendingPermission: nodeID === "left",
+      report: { outcome: "done", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, parallel)
+    await runner.start("prj_1", run.runID)
+    const before = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "blocked" && item.steps.length === 2)
+    await runner.shutdown()
+    native.release(before.activeStep!.sessionID)
+
+    await newRunner().recoverProject("prj_1", run.project.canonical)
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.recovery.attempts).toBe(1)
+    expect(final.usage.input).toBe(40)
+    expect(native.prompts.map((prompt) => prompt.nodeID)).toEqual(["left", "right", "followup", "merge"])
+  })
+
+  it("drains admitted siblings on pause and cancels every live session", async () => {
+    const { store, native, runner } = setup(({ nodeID }) => ({
+      pendingPermission: nodeID === "left" || nodeID === "right",
+      report: { outcome: "done", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, parallel)
+    await runner.start("prj_1", run.runID)
+    const waiting = await waitForRun(store, "prj_1", run.runID, (item) => item.pendingPermissions.length === 2)
+    const steps = activeSteps(waiting)
+    expect((await runner.pause("prj_1", run.runID, waiting.revision, "pause")).status).toBe("pausing")
+    for (const step of steps) native.release(step.sessionID)
+    const paused = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "paused")
+    expect(native.prompts.map((prompt) => prompt.nodeID)).toEqual(["left", "right"])
+    expect(paused.nextNode).toBe("followup")
+    await runner.resume("prj_1", run.runID, paused.revision, "resume", false)
+    await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+
+    const another = await createRun(store, { runID: "run_parallel_cancel" }, parallel)
+    await runner.start("prj_1", another.runID)
+    const active = await waitForRun(store, "prj_1", another.runID, (item) => item.pendingPermissions.length === 2)
+    const cancelled = await runner.cancel("prj_1", another.runID, active.revision, "cancel")
+    expect(cancelled.status).toBe("cancelled")
+    expect(cancelled.cancel?.interruptAccepted).toBe(true)
+    expect(cancelled.steps.map((step) => step.status)).toEqual(["interrupted", "interrupted"])
+    expect(activeSteps(cancelled)).toEqual([])
+  })
+
+  it("reserves unique steps under contention and enforces the root budget", async () => {
+    const { store, native, runner } = setup(({ nodeID }) => ({
+      report: { outcome: "done", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const workflow = parallel.replace("max_steps: 12", "max_steps: 3")
+      .replace("left: { agent: developer, next: merge }", "left: { agent: developer, next: polish }\n  polish: { agent: developer, next: merge }")
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const failed = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "failed")
+    expect(failed.failure?.code).toBe("max_steps_exhausted")
+    expect(failed.stepCount).toBe(3)
+    expect(native.prompts).toHaveLength(3)
+    expect(new Set(native.prompts.map((prompt) => prompt.stepID)).size).toBe(3)
+  })
+
+  it("retries only the ambiguous branch while another branch is live", async () => {
+    const { store, native, runner } = setup(({ nodeID }, count) => ({
+      ...(nodeID === "left" && count === 1 ? { outcome: "interrupted" } : {}),
+      delayMs: nodeID === "right" ? 500 : 0,
+      report: { outcome: "done", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, parallel)
+    await runner.start("prj_1", run.runID)
+    const blocked = await waitForRun(store, "prj_1", run.runID, (item) => item.blocker?.type === "node_interrupted")
+    expect(blocked.status).toBe("running")
+    await expect(runner.resume("prj_1", run.runID, blocked.revision, "resume", false)).rejects.toMatchObject({
+      name: "AmbiguousResumeError",
+    })
+    await runner.resume("prj_1", run.runID, blocked.revision, "resume", true)
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.steps.map((step) => step.status)).toContain("abandoned")
+    expect(native.prompts.filter((prompt) => prompt.nodeID === "left")).toHaveLength(2)
+    expect(native.prompts.filter((prompt) => prompt.nodeID === "right")).toHaveLength(1)
+  })
+})
+
+it("recovers an unlocked run immediately and retries another run's lingering lock", async () => {
+  const { store, native, locks, runner } = setup(() => ({
+    report: { outcome: "done", summary: "done", feedback: "", evidence: [] },
+  }))
+  const workflow = `version: 1
+name: sample
+entry: task
+limits: { max_steps: 1 }
+nodes:
+  task: { agent: developer, next: complete }
+`
+  const first = await createRun(store, {}, workflow)
+  const second = await createRun(store, { runID: "run_busy_recovery", project: first.project }, workflow)
+  const stale = await locks.acquire("prj_1", first.project.canonical, second.runID)
+  try {
+    await runner.recoverProject("prj_1", first.project.canonical)
+    await waitForRun(store, "prj_1", first.runID, (item) => item.status === "completed")
+    expect(native.prompts).toHaveLength(1)
+  } finally {
+    await stale.release()
+  }
+  await waitForRun(store, "prj_1", second.runID, (item) => item.status === "completed")
+  expect(native.prompts).toHaveLength(2)
+})
+
+it("joins nested forks within a branch before admitting the outer join", async () => {
+  const { store, native, runner } = setup(({ nodeID }) => ({
+    report: { outcome: "done", summary: nodeID, feedback: "", evidence: [] },
+  }))
+  const workflow = `version: 1
+name: sample
+entry: outer
+limits: { max_steps: 5 }
+nodes:
+  outer: { fork: [inner, security], join: publish }
+  inner: { fork: [left, right], join: merge }
+  left: { agent: developer, next: merge }
+  right: { agent: reviewer, next: merge }
+  merge: { agent: developer, next: publish }
+  security: { agent: reviewer, next: publish }
+  publish: { agent: reviewer, next: complete }
+`
+  const run = await createRun(store, {}, workflow)
+  await runner.start("prj_1", run.runID)
+  const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+  expect(final.stepCount).toBe(5)
+  expect(native.prompts.map((prompt) => prompt.nodeID)).toEqual(["left", "right", "security", "merge", "publish"])
+  expect(native.prompts.at(-1)?.text).toMatch(/<summary>merge<\/summary>[\s\S]*<summary>security<\/summary>/)
 })

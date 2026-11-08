@@ -293,7 +293,7 @@ function buildNodes(graph: RunGraphOutput): LayoutNode[] {
   const nodes: LayoutNode[] = graph.nodes.map((node) => ({
     id: node.nodeID,
     label: node.label,
-    agent: node.agent,
+    agent: node.agent ?? node.workflow,
     state: node.state,
     routedBack: node.routedBack === true,
     terminal: false,

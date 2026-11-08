@@ -1,0 +1,20 @@
+version: 1
+name: parallel-review
+description: Run a security review alongside the reusable review workflow
+
+entry: dispatch
+
+limits:
+  max_steps: 16
+  timeout_seconds: 3600
+
+nodes:
+  dispatch: { fork: [security, verification], join: integrate }
+  security: { agent: security, next: integrate }
+  verification:
+    workflow: review
+    routes: { complete: integrate, pause: investigate }
+  investigate: { agent: reviewer, next: integrate }
+  integrate:
+    agent: reviewer
+    routes: { approved: complete, changes_requested: pause, blocked: pause }

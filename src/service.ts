@@ -9,14 +9,15 @@ import { buildRunGraph } from "./execution/run-graph.js"
 import { buildGraph, type Diagnostic, type WorkflowGraph } from "./workflow/graph.js"
 import { WorkflowStore, RevisionConflictError } from "./state/store.js"
 import { StorageKeys } from "./state/keys.js"
-import { ProjectBusyError } from "./state/concurrency.js"
+import { RunOwnershipError } from "./state/concurrency.js"
+import { KeyedMutex } from "./util/mutex.js"
+import { activeSteps, blockersOf } from "./execution/checkpoint.js"
 import { newRunID } from "./util/ids.js"
 import { sha256 } from "./util/hash.js"
 import { errorMessage } from "./util/redact.js"
 import { zeroUsage } from "./execution/results.js"
 import type { NativeRuntime } from "./execution/native-agents.js"
 import { RunNotFoundError, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
-import { PermissionPendingError } from "./execution/runner.js"
 import {
   RunRecordSchema,
   summaryOf,
@@ -117,6 +118,8 @@ export type ServiceDeps = {
   now?: () => number
 }
 
+const admission = new KeyedMutex()
+
 export class WorkflowService {
   readonly project: ProjectIdentity
   private readonly store: WorkflowStore
@@ -144,11 +147,56 @@ export class WorkflowService {
     return { agents, hasDefaultModel: defaultModel !== undefined }
   }
 
-  private validate(
+  private async validate(
     workflow: WorkflowDefinition,
     context: Awaited<ReturnType<WorkflowService["validationContext"]>>,
-  ): WorkflowValidation {
-    return validateWorkflow(workflow, context.agents, { hasDefaultModel: context.hasDefaultModel })
+    bytes: number,
+  ): Promise<WorkflowValidation & { dependencies: NonNullable<RunRecord["workflowDependencies"]> }> {
+    const options = { hasDefaultModel: context.hasDefaultModel }
+    const root = validateWorkflow(workflow, context.agents, options)
+    const dependencies: NonNullable<RunRecord["workflowDependencies"]> = {}
+    const stack = new Set([workflow.name])
+    const visited = new Set<string>()
+
+    const visit = async (definition: WorkflowDefinition): Promise<void> => {
+      for (const [id, node] of Object.entries(definition.nodes)) {
+        if (!("workflow" in node)) continue
+        const path = `workflows.${definition.name}.nodes.${id}.workflow`
+        const name = node.workflow
+        if (stack.has(name)) {
+          root.errors.push({ path, message: `recursive workflow call to "${name}"`, code: "recursive_workflow" })
+          continue
+        }
+        if (visited.has(name)) continue
+        visited.add(name)
+        try {
+          const file = await this.repo.read(name)
+          bytes += file.size
+          if (bytes > HARD_LIMITS.maxWorkflowBytes || visited.size >= HARD_LIMITS.maxWorkflows) {
+            root.errors.push({ path, message: "combined workflow sources exceed the workflow size or count limit", code: "workflow_dependency_limit" })
+            return
+          }
+          if (!file.workflow) {
+            root.errors.push(...file.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
+            continue
+          }
+          const child = validateWorkflow(file.workflow, context.agents, options)
+          root.errors.push(...child.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
+          root.warnings.push(...[...file.warnings, ...child.warnings].map((warning) => `${name}: ${warning}`))
+          for (const agent of child.agents) {
+            if (!root.agents.some((existing) => existing.agentID === agent.agentID)) root.agents.push(agent)
+          }
+          dependencies[name] = { definition: file.workflow, hash: file.hash }
+          stack.add(name)
+          await visit(file.workflow)
+          stack.delete(name)
+        } catch (error) {
+          root.errors.push({ path, message: errorMessage(error), code: "invalid_workflow_reference" })
+        }
+      }
+    }
+    await visit(workflow)
+    return { ...root, valid: root.errors.length === 0, dependencies }
   }
 
   async listWorkflows(): Promise<{ workflows: WorkflowSummary[]; directory: string }> {
@@ -168,7 +216,7 @@ export class WorkflowService {
           })
           continue
         }
-        const validation = this.validate(file.workflow, context)
+        const validation = await this.validate(file.workflow, context, file.size)
         workflows.push({
           id,
           name: file.workflow.name,
@@ -202,7 +250,7 @@ export class WorkflowService {
         warnings: file.warnings,
       }
     }
-    const validation = this.validate(file.workflow, await this.validationContext())
+    const validation = await this.validate(file.workflow, await this.validationContext(), file.size)
     return {
       id: workflowID,
       hash: file.hash,
@@ -220,7 +268,7 @@ export class WorkflowService {
   async validateWorkflowSource(source: string, workflowID?: string): Promise<ValidationView> {
     const parsed = parseWorkflowSource(source, workflowID === undefined ? {} : { workflowID })
     if (!parsed.workflow) return { valid: false, errors: parsed.errors, warnings: parsed.warnings }
-    const validation = this.validate(parsed.workflow, await this.validationContext())
+    const validation = await this.validate(parsed.workflow, await this.validationContext(), Buffer.byteLength(source, "utf8"))
     return {
       valid: validation.valid,
       errors: [...parsed.errors, ...validation.errors],
@@ -268,98 +316,92 @@ export class WorkflowService {
 
     const requestHash = sha256(`${workflowID}\u0000${objective}`)
     const idemHash = sha256(requestID)
-    const existingID = await this.store.getIdempotency(this.project.id, idemHash)
-    if (existingID) {
-      const existing = await this.store.getRun(this.project.id, existingID)
+    const projectID = this.project.id
+    const findExisting = async (runs?: RunRecord[]): Promise<RunRecord | undefined> => {
+      const indexedID = await this.store.getIdempotency(projectID, idemHash)
+      const indexed = indexedID ? await this.store.getRun(projectID, indexedID) : undefined
+      const existing = indexed ?? (runs ?? await this.store.listRuns(projectID)).find((run) => run.requestID === requestID)
       if (existing) {
-        if (existing.project.canonical !== this.project.canonical) throw new RunNotFoundError(existing.runID)
+        this.ensureProject(existing)
         if (existing.requestHash !== requestHash) throw new IdempotencyConflictError()
-        return summaryOf(existing)
       }
+      return existing
     }
-    // Recover an idempotent start that crashed between run creation and idempotency-key write.
-    const byRequest = (await this.store.listRuns(this.project.id)).find(
-      (run) => run.requestID === requestID && run.requestHash === requestHash,
-    )
-    if (byRequest) {
-      if (byRequest.project.canonical !== this.project.canonical) throw new RunNotFoundError(byRequest.runID)
-      await this.store.setIdempotency(this.project.id, idemHash, byRequest.runID)
-      return summaryOf(byRequest)
+    const prior = await findExisting()
+    if (prior) {
+      await this.startExisting(prior)
+      return summaryOf(prior)
     }
 
     const workflow = await this.repo.read(workflowID)
     if (!workflow.workflow) throw new InvalidWorkflowError("workflow validation failed", workflow.errors)
-    const validation = this.validate(workflow.workflow, await this.validationContext())
+    const definition = workflow.workflow
+    const validation = await this.validate(definition, await this.validationContext(), workflow.size)
     if (!validation.valid) throw new InvalidWorkflowError("workflow validation failed", validation.errors)
 
-    const all = await this.store.listRuns(this.project.id)
-    if (all.length >= HARD_LIMITS.maxRuns) throw new TooManyRunsError()
-    if (this.runner.hasProjectLock(this.project.canonical)) {
-      throw new ProjectBusyError()
-    }
+    const { run: created, existing } = await admission.run(projectID, async () => {
+      const all = await this.store.listRuns(projectID)
+      const existing = await findExisting(all)
+      if (existing) return { run: existing, existing: true }
+      if (all.length >= HARD_LIMITS.maxRuns) throw new TooManyRunsError()
 
-    const now = this.now()
-    const runID = newRunID(now)
-    const run: RunRecord = {
-      schemaVersion: 1,
-      runID,
-      workflowID,
-      requestID,
-      requestHash,
-      project: this.project,
-      workflowHash: workflow.hash,
-      workflowSnapshot: workflow.workflow,
-      sourceYamlKey: StorageKeys.source(this.project.id, runID),
-      objective,
-      status: "running",
-      revision: 1,
-      createdAt: now,
-      updatedAt: now,
-      startedAt: now,
-      deadlineAt: now + workflow.workflow.limits.timeout_seconds * 1_000,
-      runSessionID: null,
-      currentNode: null,
-      nextNode: workflow.workflow.entry,
-      stepCount: 0,
-      maxSteps: workflow.workflow.limits.max_steps,
-      activeStep: null,
-      lastStep: null,
-      steps: [],
-      blocker: null,
-      pendingPermissions: [],
-      failure: null,
-      pause: null,
-      cancel: null,
-      usage: zeroUsage(),
-      audit: { toolCalls: [], mutatingToolCalls: 0 },
-      owner: { instanceID: this.instanceID, hostname: hostname(), pid: process.pid },
-      recovery: { attempts: 0 },
-      recentControlRequests: {},
-    }
-
-    const created = await this.store.createRun(RunRecordSchema.parse(run))
-    await this.store.putSource(this.project.id, runID, workflow.source)
-    await this.store.setIdempotency(this.project.id, idemHash, runID)
-    try {
-      await this.runner.start(this.project.id, runID)
-    } catch (error) {
-      if (error instanceof ProjectBusyError) {
-        await this.store.mutateRun(this.project.id, runID, null, (draft) => {
-          draft.status = "failed"
-          draft.failure = { code: "project_busy", message: "another workflow is active for this project" }
-          draft.completedAt = this.now()
-        })
-        await this.store.removeIdempotency(this.project.id, idemHash)
-        throw error
+      const now = this.now()
+      const runID = newRunID(now)
+      const run: RunRecord = {
+        schemaVersion: 1,
+        runID,
+        workflowID,
+        requestID,
+        requestHash,
+        project: this.project,
+        workflowHash: workflow.hash,
+        workflowSnapshot: definition,
+        ...(Object.keys(validation.dependencies).length === 0 ? {} : { workflowDependencies: validation.dependencies }),
+        sourceYamlKey: StorageKeys.source(this.project.id, runID),
+        objective,
+        status: "running",
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+        startedAt: now,
+        deadlineAt: now + definition.limits.timeout_seconds * 1_000,
+        runSessionID: null,
+        currentNode: null,
+        nextNode: definition.entry,
+        stepCount: 0,
+        maxSteps: definition.limits.max_steps,
+        activeStep: null,
+        lastStep: null,
+        steps: [],
+        blocker: null,
+        pendingPermissions: [],
+        failure: null,
+        pause: null,
+        cancel: null,
+        usage: zeroUsage(),
+        audit: { toolCalls: [], mutatingToolCalls: 0 },
+        owner: { instanceID: this.instanceID, hostname: hostname(), pid: process.pid },
+        recovery: { attempts: 0 },
+        recentControlRequests: {},
       }
-      await this.store.mutateRun(this.project.id, runID, null, (draft) => {
-        draft.status = "failed"
-        draft.failure = { code: "start_failed", message: errorMessage(error) }
-        draft.completedAt = this.now()
-      }).catch(() => undefined)
-      throw error
-    }
+
+      await this.store.putSource(projectID, runID, workflow.source)
+      const created = await this.store.createRun(RunRecordSchema.parse(run))
+      await this.store.setIdempotency(projectID, idemHash, runID)
+      return { run: created, existing: false }
+    })
+
+    if (existing) await this.startExisting(created)
+    else await this.runner.start(projectID, created.runID)
     return summaryOf(created)
+  }
+
+  private async startExisting(run: RunRecord): Promise<void> {
+    if (run.status === "running" || run.status === "pausing" || run.status === "blocked") {
+      await this.runner.start(run.project.id, run.runID, { recovery: true }).catch((error) => {
+        if (!(error instanceof RunOwnershipError)) throw error
+      })
+    }
   }
 
   private ensureProject(run: RunRecord): void {
@@ -380,16 +422,15 @@ export class WorkflowService {
     const run = await this.store.getRun(this.project.id, runID)
     if (!run) throw new WorkflowNotFoundError(runID)
     this.ensureProject(run)
-    const currentStep =
-      run.activeStep === null ? null : await this.store.getStep(this.project.id, run.runID, run.activeStep.stepID)
-    let pendingPermissions = run.pendingPermissions
-    if (run.activeStep) {
-      pendingPermissions = await this.native.listPermissions(run.activeStep.sessionID).catch(() => run.pendingPermissions)
-    }
+    const steps = activeSteps(run)
+    const currentSteps = (await Promise.all(steps.map((step) => this.store.getStep(this.project.id, run.runID, step.stepID))))
+      .filter((step): step is StepRecord => step !== undefined)
     return {
       run,
-      currentStep: currentStep ?? null,
-      pendingPermissions,
+      currentStep: currentSteps.find((step) => step.stepID === run.activeStep?.stepID) ?? null,
+      currentSteps,
+      blockers: blockersOf(run),
+      pendingPermissions: await this.runner.livePermissions(run),
       mermaid: renderMermaid(buildGraph(run.workflowSnapshot)),
       resumable: isResumable(run),
     }
@@ -397,10 +438,7 @@ export class WorkflowService {
 
   async getRunGraph(runID: string): Promise<ReturnType<typeof buildRunGraph>> {
     const run = await this.requireRun(runID)
-    const pending = run.activeStep
-      ? await this.native.listPermissions(run.activeStep.sessionID).catch(() => run.pendingPermissions)
-      : run.pendingPermissions
-    return buildRunGraph(run, pending)
+    return buildRunGraph(run, await this.runner.livePermissions(run))
   }
 
   async getRunStep(runID: string, stepID: string): Promise<StepRecord> {
@@ -425,10 +463,6 @@ export class WorkflowService {
     confirmRetry = false,
   ): Promise<RunSummary> {
     const run = await this.requireRun(runID)
-    if (run.activeStep) {
-      const live = await this.native.listPermissions(run.activeStep.sessionID).catch(() => run.pendingPermissions)
-      if (live.length > 0) throw new PermissionPendingError(live)
-    }
     const updated = await this.runner.resume(this.project.id, run.runID, expectedRevision, requestID, confirmRetry)
     return summaryOf(updated)
   }
@@ -440,7 +474,7 @@ export class WorkflowService {
   }
 
   async recover(): Promise<void> {
-    await this.runner.recoverProject(this.project.id)
+    await this.runner.recoverProject(this.project.id, this.project.canonical)
   }
 
   private async requireRun(runID: string): Promise<RunRecord> {
@@ -452,9 +486,9 @@ export class WorkflowService {
 }
 
 function isResumable(run: RunRecord): boolean {
-  if (run.status === "paused") return run.nextNode !== null && run.pause?.reason !== "route"
+  if (run.status === "paused") return run.pause?.reason !== "route"
   if (run.status === "blocked") return run.blocker?.type === "permission" || run.activeStep !== null
-  return false
+  return run.status === "running" && blockersOf(run).some((blocker) => blocker.type !== "permission")
 }
 
 export { RevisionConflictError }

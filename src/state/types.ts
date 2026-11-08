@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { NodeResultSchema, WorkflowSchema } from "../workflow/schema.js"
+import { HARD_LIMITS, NodeIdSchema, NodeResultSchema, WorkflowIdSchema, WorkflowSchema } from "../workflow/schema.js"
 
 export const RUN_STATUSES = [
   "running",
@@ -110,8 +110,14 @@ export const EvidenceReportSchema = z
   .strict()
 export type EvidenceReport = z.infer<typeof EvidenceReportSchema>
 
+const stepLocation = {
+  workflowID: WorkflowIdSchema.optional(),
+  callPath: z.array(NodeIdSchema).max(HARD_LIMITS.maxWorkflows).optional(),
+}
+
 export const StepSummarySchema = z
   .object({
+    ...stepLocation,
     stepID: z.string().min(1).max(64),
     seq: z.number().int().positive(),
     nodeID: z.string().min(1).max(64),
@@ -126,6 +132,7 @@ export type StepSummary = z.infer<typeof StepSummarySchema>
 
 export const ActiveStepSchema = z
   .object({
+    ...stepLocation,
     stepID: z.string().min(1).max(64),
     stepIndex: z.number().int().positive(),
     attempt: z.number().int().positive(),
@@ -168,6 +175,40 @@ export const RecoveryInfoSchema = z
   .strict()
 export type RecoveryInfo = z.infer<typeof RecoveryInfoSchema>
 
+const RepeatSchema = z.object({ key: z.string().max(164), count: z.number().int().positive() }).strict()
+const HandoffSchema = z.array(z.string().max(64)).max(HARD_LIMITS.maxRoutesPerNode)
+const BranchSchema = z.object({
+  id: z.string(),
+  workflowID: WorkflowIdSchema,
+  nodeID: z.string().min(1).max(64),
+  calls: z.array(z.object({
+    workflowID: WorkflowIdSchema, nodeID: NodeIdSchema, previous: HandoffSchema, repeat: RepeatSchema.optional(),
+  }).strict())
+    .max(HARD_LIMITS.maxWorkflows),
+  join: z.object({ id: z.string(), index: z.number().int().nonnegative() }).strict().optional(),
+  previous: HandoffSchema,
+  joined: z.boolean().optional(),
+  repeat: RepeatSchema.optional(),
+  active: ActiveStepSchema.optional(),
+  blocker: BlockerSchema.optional(),
+  permissions: z.array(PermissionSummarySchema).max(50).optional(),
+}).strict()
+export type Branch = z.infer<typeof BranchSchema>
+
+const ExecutionSchema = z.object({
+  branches: z.array(BranchSchema).max(HARD_LIMITS.maxSteps),
+  joins: z.record(z.string(), z.object({
+    target: NodeIdSchema,
+    continuation: BranchSchema,
+    arrivals: z.array(z.string().max(64).nullable()).min(2).max(HARD_LIMITS.maxRoutesPerNode),
+  }).strict()),
+  enteredForks: z.array(NodeIdSchema).max(HARD_LIMITS.maxNodes),
+  nextFork: z.number().int().positive(),
+  nextStep: z.number().int().positive(),
+}).strict()
+
+export const MAX_RUN_PERMISSIONS = HARD_LIMITS.maxSteps * 50
+
 export const RunRecordSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -179,6 +220,11 @@ export const RunRecordSchema = z
     project: ProjectIdentitySchema,
     workflowHash: z.string().length(64),
     workflowSnapshot: WorkflowSchema,
+    workflowDependencies: z.record(WorkflowIdSchema, z.object({
+      definition: WorkflowSchema,
+      hash: z.string().length(64),
+    }).strict()).optional(),
+    execution: ExecutionSchema.optional(),
     sourceYamlKey: z.string().min(1).max(512),
 
     objective: z.string().min(1).max(16 * 1024),
@@ -202,7 +248,7 @@ export const RunRecordSchema = z
     steps: z.array(StepSummarySchema).max(500),
 
     blocker: BlockerSchema.nullable(),
-    pendingPermissions: z.array(PermissionSummarySchema).max(50).default([]),
+    pendingPermissions: z.array(PermissionSummarySchema).max(MAX_RUN_PERMISSIONS).default([]),
     failure: FailureInfoSchema.nullable(),
     pause: z
       .object({
@@ -235,6 +281,7 @@ export type RunRecord = z.infer<typeof RunRecordSchema>
 
 export const StepRecordSchema = z
   .object({
+    ...stepLocation,
     schemaVersion: z.literal(1),
     runID: z.string().min(1).max(64),
     stepID: z.string().min(1).max(64),
@@ -298,6 +345,8 @@ export const RunDetailSchema = z
   .object({
     run: RunRecordSchema,
     currentStep: StepRecordSchema.nullable(),
+    currentSteps: z.array(StepRecordSchema).optional(),
+    blockers: z.array(BlockerSchema).optional(),
     pendingPermissions: z.array(PermissionSummarySchema),
     mermaid: z.string(),
     resumable: z.boolean(),

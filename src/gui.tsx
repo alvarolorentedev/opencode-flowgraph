@@ -216,7 +216,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
 
   const activeSession = () => {
     const value = graph()
-    return value?.activeNode ? nodeSession(value, value.activeNode) : undefined
+    return value?.activeSteps?.[0]?.sessionID ?? (value?.activeNode ? nodeSession(value, value.activeNode) : undefined)
   }
 
   const openActive = () => {
@@ -241,11 +241,11 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   const resume = async () => {
     const value = graph()
     if (!value) return
-    const confirm = value.status === "blocked"
+    const confirm = value.blockers?.some((blocker) => blocker.type !== "permission") ?? value.status === "blocked"
     if (confirm) {
       const ok = await ctx.dialogs.confirm({
-        title: "Retry workflow node?",
-        description: "The active node is ambiguous. Retrying may repeat work. Continue?",
+        title: "Retry ambiguous workflow steps?",
+        description: "Retrying ambiguous steps may repeat work.",
         confirm: "Retry",
         cancel: "Cancel",
       })
@@ -266,7 +266,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
     if (!value) return
     const ok = await ctx.dialogs.confirm({
       title: "Cancel workflow run?",
-      description: "Future nodes will not execute. The active node may be interrupted.",
+      description: "Active sessions will receive an interrupt request.",
       confirm: "Cancel run",
       cancel: "Keep running",
       danger: true,
@@ -311,9 +311,9 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                 <div class="awf-graph-muted">
                   Run {value.runID} · revision {value.revision}
                 </div>
-                <Show when={value.blocker}>
-                  {(blocker) => <div class="awf-graph-warn">Blocked: {blocker().message}</div>}
-                </Show>
+                {(value.blockers ?? (value.blocker ? [value.blocker] : [])).map((blocker) => (
+                  <div class="awf-graph-warn">Blocked: {blocker.message}</div>
+                ))}
                 <Show when={value.failure}>
                   {(failure) => (
                     <div class="awf-graph-error">
@@ -342,6 +342,18 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                 </span>
               </div>
               <div class="awf-mermaid" ref={container} style={{ zoom: `${zoom()}%` }} />
+              {value.nodes.filter((node) => node.childSteps?.length).map((node) => (
+                <details>
+                  <summary>{node.label} · {node.childSteps!.filter((step) => step.status === "completed").length}/{node.stepCount} child steps completed</summary>
+                  <div class="awf-graph-actions">
+                    {node.childSteps!.map((step) => (
+                      <button onClick={() => ctx.tabs.open({ server: props.session.server.id, id: step.sessionID }, { focus: true })}>
+                        {step.callPath?.slice(1).concat(step.nodeID).join(" / ") ?? step.nodeID} · step {step.seq} · {step.status}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              ))}
               <div class="awf-graph-muted">Click a node to open its native session.</div>
             </>
           )

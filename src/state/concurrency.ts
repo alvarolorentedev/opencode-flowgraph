@@ -11,61 +11,32 @@ export class ProjectBusyError extends Error {
   }
 }
 
-export type ProjectLock = {
-  projectID: string
-  canonical: string
-  release(): Promise<void>
+export class RunOwnershipError extends Error {
+  constructor() {
+    super("another instance owns this workflow run")
+    this.name = "RunOwnershipError"
+  }
 }
 
-export class ProjectLockManager {
+export type RunLock = { release(): Promise<void> }
+
+export class RunLockManager {
   private readonly base = path.join(os.tmpdir(), "opencode-flowgraph", "locks")
-  private readonly held = new Map<string, { release: () => Promise<void>; lock: ProjectLock }>()
 
-  async acquire(projectID: string, canonical: string): Promise<ProjectLock> {
-    const key = sha256(`${projectID}\u0000${canonical}`).slice(0, 40)
-    const existing = this.held.get(key)
-    if (existing) return existing.lock
-
+  async acquire(projectID: string, canonical: string, runID: string): Promise<RunLock> {
+    const key = sha256(`${projectID}\u0000${canonical}\u0000${runID}`).slice(0, 40)
     await fs.mkdir(this.base, { recursive: true })
-    const target = path.join(this.base, `${key}.target`)
-    await fs.writeFile(target, "", { flag: "a" })
-
-    let release: () => Promise<void>
     try {
-      release = await lockfile.lock(target, {
+      const release = await lockfile.lock(path.join(this.base, key), {
         realpath: false,
         stale: 120_000,
         update: 30_000,
         retries: 0,
       })
+      return { release }
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code === "ELOCKED") throw new ProjectBusyError()
+      if ((error as NodeJS.ErrnoException).code === "ELOCKED") throw new RunOwnershipError()
       throw error
     }
-
-    let released = false
-    const lock: ProjectLock = {
-      projectID,
-      canonical,
-      release: async () => {
-        if (released) return
-        released = true
-        this.held.delete(key)
-        await release().catch(() => undefined)
-      },
-    }
-    this.held.set(key, { release, lock })
-    return lock
-  }
-
-  async releaseAll(): Promise<void> {
-    const locks = Array.from(this.held.values())
-    this.held.clear()
-    await Promise.allSettled(locks.map((item) => item.release()))
-  }
-
-  get size(): number {
-    return this.held.size
   }
 }

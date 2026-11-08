@@ -6,7 +6,7 @@ import { WorkflowService } from "./service.js"
 import { WorkflowRepository } from "./workflow/loader.js"
 import { HARD_LIMITS } from "./workflow/schema.js"
 import { WorkflowStore, type JsonValue, type StoragePort } from "./state/store.js"
-import { ProjectLockManager } from "./state/concurrency.js"
+import { RunLockManager } from "./state/concurrency.js"
 import { createInvocationRegistry } from "./execution/report-tool.js"
 import { ReportTool } from "./execution/report-tool.js"
 import { registerToolHooks } from "./execution/tool-hooks.js"
@@ -49,7 +49,7 @@ export default Plugin.define({
     const store = new WorkflowStore(storagePort(ctx))
     const native = new OpenCodeNativeRuntime(ctx)
     const repo = new WorkflowRepository(ctx.location.project.directory)
-    const locks = new ProjectLockManager()
+    const locks = new RunLockManager()
     const invocations = createInvocationRegistry()
     let emitRunUpdated: (payload: unknown) => Promise<void> = async () => undefined
 
@@ -58,6 +58,7 @@ export default Plugin.define({
       native,
       locks,
       invocations,
+      instanceID,
       emit: (payload) => emitRunUpdated(payload),
       options: {
         pollIntervalMs: numberOption(ctx.options.pollIntervalMs, 1_000),
@@ -100,8 +101,8 @@ export default Plugin.define({
         structuredResults: "tool",
         conservativeRecovery: true,
         runGraph: true,
-        parallelBranches: false,
-        nestedWorkflows: false,
+        parallelBranches: true,
+        nestedWorkflows: true,
         backgroundNativeWork: false,
       },
       limits: {

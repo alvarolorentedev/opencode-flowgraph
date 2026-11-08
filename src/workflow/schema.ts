@@ -55,7 +55,7 @@ export const LimitsSchema = z
   })
   .strict()
 
-export const NodeSchema = z
+const AgentNodeSchema = z
   .object({
     agent: AgentRefSchema,
     label: z.string().min(1).max(80).optional(),
@@ -78,6 +78,21 @@ export const NodeSchema = z
       })
     }
   })
+
+const ForkNodeSchema = z.object({
+  label: z.string().min(1).max(80).optional(),
+  fork: z.array(NodeIdSchema).min(2).max(HARD_LIMITS.maxRoutesPerNode)
+    .refine((branches) => new Set(branches).size === branches.length, "fork branches must be distinct"),
+  join: NodeIdSchema,
+}).strict()
+
+const CallNodeSchema = z.object({
+  label: z.string().min(1).max(80).optional(),
+  workflow: WorkflowIdSchema,
+  routes: z.object({ complete: TargetSchema, pause: TargetSchema }).strict(),
+}).strict()
+
+export const NodeSchema = z.union([AgentNodeSchema, ForkNodeSchema, CallNodeSchema])
 
 export const WorkflowSchema = z
   .object({

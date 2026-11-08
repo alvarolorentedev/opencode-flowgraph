@@ -5,7 +5,7 @@ import path from "node:path"
 import { WorkflowService } from "../src/service.js"
 import { runServerCommand } from "../src/server-command.js"
 import { WorkflowRunner } from "../src/execution/runner.js"
-import { ProjectLockManager } from "../src/state/concurrency.js"
+import { RunLockManager } from "../src/state/concurrency.js"
 import { WorkflowStore } from "../src/state/store.js"
 import { createInvocationRegistry } from "../src/execution/report-tool.js"
 import { FakeNative } from "./fixtures/fake-native.js"
@@ -30,7 +30,7 @@ async function setup() {
   const native = new FakeNative(store, project.id, () => ({
     report: { outcome: "done", summary: "ok", feedback: "", evidence: [] },
   }))
-  const locks = new ProjectLockManager()
+  const locks = new RunLockManager()
   const invocations = createInvocationRegistry()
   const runner = new WorkflowRunner({
     store,

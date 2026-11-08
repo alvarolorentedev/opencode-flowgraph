@@ -41,7 +41,7 @@ export function resolveAgents(
   const checked = new Set<string>()
 
   for (const [nodeId, node] of Object.entries(workflow.nodes)) {
-    if (checked.has(node.agent)) continue
+    if (!("agent" in node) || checked.has(node.agent)) continue
     checked.add(node.agent)
     const agent = byId.get(node.agent)
     if (!agent) {

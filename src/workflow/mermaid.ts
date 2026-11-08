@@ -12,7 +12,7 @@ export type MermaidEdge = {
   from: string
   to: string
   label?: string
-  kind: "next" | "route"
+  kind: "next" | "route" | "fork"
 }
 
 export type MermaidModel = {
@@ -46,7 +46,7 @@ export function escapeMermaidText(value: string): string {
 
 export function buildMermaidModel(graph: WorkflowGraph): MermaidModel {
   const orderedIds = [
-    ...(graph.nodes[graph.entry] ? [graph.entry] : []),
+    ...(Object.hasOwn(graph.nodes, graph.entry) ? [graph.entry] : []),
     ...Object.keys(graph.nodes)
       .filter((id) => id !== graph.entry)
       .sort(),
@@ -57,7 +57,9 @@ export function buildMermaidModel(graph: WorkflowGraph): MermaidModel {
   const nodes: MermaidNode[] = orderedIds.map((nodeId) => ({
     id: mermaidIds.get(nodeId)!,
     nodeId,
-    label: graph.nodes[nodeId]!.label,
+    label: graph.nodes[nodeId]!.workflow === undefined
+      ? graph.nodes[nodeId]!.label
+      : `${graph.nodes[nodeId]!.label} (${graph.nodes[nodeId]!.workflow})`,
     terminal: false,
   }))
 

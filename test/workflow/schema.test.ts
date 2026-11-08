@@ -164,3 +164,53 @@ describe("mermaid generation", () => {
     expect(escaped).toContain("&lt;script&gt;")
   })
 })
+
+describe("structured fork validation", () => {
+  const source = `version: 1
+name: parallel
+entry: start
+limits: { max_steps: 20 }
+nodes:
+  start: { fork: [left, right], join: finish }
+  left: { fork: [scan, review], join: merge }
+  scan: { agent: developer, routes: { again: scan, done: merge } }
+  review: { agent: reviewer, next: merge }
+  merge: { agent: reviewer, next: finish }
+  right: { agent: developer, next: finish }
+  finish: { agent: reviewer, routes: { again: start, done: complete } }
+`
+
+  function diagnostics(yaml: string) {
+    const result = parseWorkflowSource(yaml)
+    return result.workflow ? validateGraph(result.workflow, buildGraph(result.workflow)).errors : result.errors
+  }
+
+  it("accepts nested forks and loop routes contained in a branch", () => {
+    expect(diagnostics(source)).toEqual([])
+  })
+
+  it("rejects duplicate, overlapping, and escaping branches and bypass edges", () => {
+    expect(diagnostics(source.replace("[left, right]", "[left, left]"))).not.toHaveLength(0)
+    for (const yaml of [
+      source.replace("next: merge }\n  merge", "next: finish }\n  merge"),
+      source.replace("next: finish }\n  finish", "next: merge }\n  finish"),
+      source.replace("again: start, done: complete", "again: left, done: complete"),
+      source.replace("again: scan, done: merge", "again: scan, done: scan"),
+    ]) {
+      expect(diagnostics(yaml)).toEqual(expect.arrayContaining([expect.objectContaining({ code: "invalid_join" })]))
+    }
+  })
+})
+
+it("reports an unknown route target even when its name is inherited from Object", () => {
+  const workflow = parseWorkflowSource(`version: 1
+name: example
+entry: start
+limits: { max_steps: 2 }
+nodes:
+  start: { agent: developer, next: constructor }
+`).workflow!
+  expect(validateGraph(workflow, buildGraph(workflow)).errors).toEqual(expect.arrayContaining([
+    expect.objectContaining({ path: "nodes.start.next", code: "invalid_target" }),
+  ]))
+})
