@@ -57,6 +57,14 @@ OPENCODE_SMOKE=1 OPENCODE_BIN=/path/to/opencode bun run test:smoke
 
 It starts an isolated `opencode api --standalone` request, loads the plugin from this repository, and calls `capabilities` and `listWorkflows`. It does not make model calls.
 
+The opt-in model-routing integration uses a local OpenAI-compatible mock server and makes no paid model calls:
+
+```sh
+OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=/path/to/opencode bun run test:integration
+```
+
+It checks the model IDs and variant sent in actual inference requests. The default unit suite still uses `FakeNative` and does not require an OpenCode binary.
+
 A real-model end-to-end verification is manual: define two primary agents, create the workflow, start a run through RPC, verify the review loop, disconnect the client, restart the server, and confirm conservative recovery. See [`operations.md`](operations.md) and [`interfaces.md`](interfaces.md).
 
 A local plugin entry needs a root `index.ts` (server) and `rpc.ts` (shared contract); this repository provides both.

@@ -101,7 +101,8 @@ export class OpenCodeNativeRuntime implements NativeRuntime {
   }
 
   async getDefaultModel(): Promise<{ providerID: string; id: string } | undefined> {
-    const model = (await this.ctx.model.default()) as unknown
+    const result = (await this.ctx.model.default()) as unknown
+    const model = result && typeof result === "object" && "data" in result ? result.data : result
     if (!model || typeof model !== "object") return undefined
     const record = model as { providerID?: unknown; id?: unknown; modelID?: unknown }
     const id = typeof record.id === "string" ? record.id : typeof record.modelID === "string" ? record.modelID : undefined
@@ -124,12 +125,16 @@ export class OpenCodeNativeRuntime implements NativeRuntime {
     metadata: Record<string, string>
     model?: { providerID: string; id: string; variant?: string }
   }): Promise<{ id: string }> {
+    const available = input.model && (await this.ctx.model.list()).data.some(
+      (model) => model.providerID === input.model?.providerID && model.id === input.model.id,
+    )
     const session = await this.ctx.session.create({
       parentID: input.parentID as never,
       agent: Agent.ID.make(input.agent),
       title: input.title,
       metadata: input.metadata,
-      ...(input.model === undefined ? {} : { model: input.model }),
+      // Leave unavailable models unset so OpenCode can use its normal model fallback.
+      ...(available ? { model: input.model } : {}),
     })
     return { id: session.id }
   }

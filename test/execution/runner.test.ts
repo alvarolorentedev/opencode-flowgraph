@@ -251,6 +251,41 @@ nodes:
     expect(opusSession?.model).toEqual({ providerID: "anthropic", id: "claude-opus-4" })
   })
 
+  it("preserves distinct configured models and variants for each node", async () => {
+    const workflow = `version: 1
+name: sample
+entry: developer
+limits: { max_steps: 3, timeout_seconds: 60 }
+nodes:
+  developer: { agent: developer, next: opus-reviewer }
+  opus-reviewer: { agent: opus-reviewer, next: variant-reviewer }
+  variant-reviewer: { agent: variant-reviewer, next: complete }
+`
+    const { store, native, runner } = setup(() => ({
+      report: { outcome: "done", summary: "done", feedback: "", evidence: [] },
+    }))
+    native.agents.find((agent) => agent.id === "developer")!.model = { providerID: "openai", id: "gpt-4.1" }
+    native.agents.push({
+      id: "variant-reviewer",
+      name: "Variant Reviewer",
+      mode: "primary",
+      hidden: false,
+      model: { providerID: "anthropic", id: "claude-sonnet-4", variant: "low" },
+    })
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["developer", "opus-reviewer", "variant-reviewer"])
+    const sessions = Array.from(native.sessions.values())
+    expect(sessions.find((session) => session.agent === "developer")?.model).toEqual({ providerID: "openai", id: "gpt-4.1" })
+    expect(sessions.find((session) => session.agent === "opus-reviewer")?.model).toEqual({ providerID: "anthropic", id: "claude-opus-4" })
+    expect(sessions.find((session) => session.agent === "variant-reviewer")?.model).toEqual({
+      providerID: "anthropic",
+      id: "claude-sonnet-4",
+      variant: "low",
+    })
+  })
+
   it("blocks an ambiguous active node after restart", async () => {
     const workflow = `version: 1
 name: sample
