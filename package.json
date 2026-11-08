@@ -1,6 +1,6 @@
 {
   "name": "@alvarolorentedev/opencode-flowgraph",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "OpenCode V2 plugin for user-defined multi-agent YAML workflows with native agents, conditional routing, persistence, recovery, and generated Mermaid.",
   "type": "module",
   "license": "Apache-2.0",

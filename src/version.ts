@@ -1,2 +1,2 @@
 export const PLUGIN_NAME = "@alvarolorentedev/opencode-flowgraph"
-export const PLUGIN_VERSION = "0.8.2"
+export const PLUGIN_VERSION = "0.9.0"
