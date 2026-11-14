@@ -24,8 +24,10 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
   for (const step of active) {
     if (steps.has(step.stepID)) continue
     steps.set(step.stepID, {
-      stepID: step.stepID, seq: step.stepIndex, nodeID: step.nodeID, workflowID: step.workflowID,
-      callPath: step.callPath, sessionID: step.sessionID, status: "running", startedAt: step.startedAt,
+      stepID: step.stepID, seq: step.stepIndex, nodeID: step.nodeID,
+      ...(step.workflowID === undefined ? {} : { workflowID: step.workflowID }),
+      ...(step.callPath === undefined ? {} : { callPath: step.callPath }),
+      sessionID: step.sessionID, status: "running", startedAt: step.startedAt,
     })
   }
   const history = new Map<string, StepSummary[]>()
@@ -60,9 +62,9 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     return {
       nodeID: node.id,
       label: node.label,
-      agent: node.agent,
-      workflow: node.workflow,
-      join: node.join,
+      ...(node.agent === undefined ? {} : { agent: node.agent }),
+      ...(node.workflow === undefined ? {} : { workflow: node.workflow }),
+      ...(node.join === undefined ? {} : { join: node.join }),
       ...(node.workflow && { childSteps: entries }),
       state,
       routedBack,
@@ -84,7 +86,9 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     currentNode: run.currentNode,
     nodes,
     edges: Object.values(graph.nodes).flatMap((node) => node.edges.map((edge) => ({
-      from: node.id, to: edge.target, outcome: edge.outcome, kind: edge.kind, terminal: edge.terminal,
+      from: node.id, to: edge.target,
+      ...(edge.outcome === undefined ? {} : { outcome: edge.outcome }),
+      kind: edge.kind, terminal: edge.terminal,
     }))),
     mermaid: renderMermaid(graph),
     mermaidNodes,

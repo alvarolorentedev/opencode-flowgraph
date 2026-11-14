@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { buildRunGraph } from "../../src/execution/run-graph.js"
 import { RunGraphOutputSchema } from "../../src/contract.js"
+import { parseWorkflowSource } from "../../src/workflow/loader.js"
 import { makeRunRecord } from "../fixtures/memory.js"
+
+function undefinedPaths(value: unknown, path: string[] = []): string[] {
+  if (value === undefined) return [path.join(".") || "<root>"]
+  if (value === null || typeof value !== "object") return []
+  if (Array.isArray(value)) return value.flatMap((item, index) => undefinedPaths(item, [...path, String(index)]))
+  return Object.entries(value).flatMap(([key, item]) => undefinedPaths(item, [...path, key]))
+}
 
 describe("buildRunGraph", () => {
   it("marks completed and active nodes and maps Mermaid IDs", () => {
@@ -192,5 +200,49 @@ describe("buildRunGraph", () => {
     expect(graph.nodes.find((node) => node.nodeID === "reviewer")?.state).toBe("failed")
     expect(graph.failure).toMatchObject({ code: "native_failure", message: "failed", nodeID: "reviewer" })
     expect(graph.controls.canCancel).toBe(false)
+  })
+
+  it("returns only JSON values for parallel runs and running steps", () => {
+    const workflow = parseWorkflowSource(
+      `version: 1
+name: parallel
+entry: dispatch
+limits: { max_steps: 12 }
+nodes:
+  dispatch: { fork: [left, right], join: merge }
+  left: { agent: developer, next: merge }
+  right: { agent: reviewer, next: merge }
+  merge:
+    agent: developer
+    routes: { done: complete }
+`,
+      { workflowID: "parallel" },
+    ).workflow!
+
+    const graph = buildRunGraph(
+      makeRunRecord({
+        workflowID: "parallel",
+        workflowSnapshot: workflow,
+        status: "running",
+        currentNode: "left",
+        activeStep: {
+          stepID: "step_000001_a001",
+          stepIndex: 1,
+          attempt: 1,
+          nodeID: "left",
+          agentID: "developer",
+          sessionID: "sess_left_1",
+          promptMessageID: "msg_1",
+          phase: "prompted",
+          startedAt: 1,
+        },
+      } as never),
+    )
+
+    // The RPC encoder rejects undefined values, so every present key must be JSON.
+    expect(undefinedPaths(graph)).toEqual([])
+    const dispatch = graph.nodes.find((node) => node.nodeID === "dispatch")
+    expect(dispatch).toMatchObject({ join: "merge" })
+    expect(dispatch).not.toHaveProperty("agent")
   })
 })
