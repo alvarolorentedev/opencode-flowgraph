@@ -137,6 +137,13 @@ describe("graph validation", () => {
     )
     expect(withModels.valid).toBe(true)
   })
+
+  it("rejects agent nodes when the harness cannot return structured results", () => {
+    const parsed = parseWorkflowSource(valid, { workflowID: "development" }).workflow!
+    const result = validateWorkflow(parsed, agents, { resultsSupported: false })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((error) => error.code === "harness_results_unsupported")).toBe(true)
+  })
 })
 
 describe("mermaid generation", () => {

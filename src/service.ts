@@ -1,5 +1,4 @@
 import { hostname } from "node:os"
-import path from "node:path"
 import { HARD_LIMITS } from "./workflow/schema.js"
 import type { WorkflowDefinition } from "./workflow/schema.js"
 import { WorkflowFileError, WorkflowRepository, parseWorkflowSource } from "./workflow/loader.js"
@@ -16,8 +15,8 @@ import { newRunID } from "./util/ids.js"
 import { sha256 } from "./util/hash.js"
 import { errorMessage } from "./util/redact.js"
 import { zeroUsage } from "./execution/results.js"
-import type { NativeRuntime } from "./execution/native-agents.js"
-import { RunNotFoundError, type HumanDecision, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
+import type { HarnessAdapter } from "./execution/harness.js"
+import { NotResumableError, RunNotFoundError, type HumanDecision, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
 import {
   RunRecordSchema,
   summaryOf,
@@ -111,7 +110,7 @@ export type ServiceDeps = {
   project: ProjectIdentity
   store: WorkflowStore
   runner: WorkflowRunner
-  native: NativeRuntime
+  harness: HarnessAdapter
   repo: WorkflowRepository
   instanceID: string
   emit: (payload: RunUpdatedPayload) => Promise<void>
@@ -124,7 +123,7 @@ export class WorkflowService {
   readonly project: ProjectIdentity
   private readonly store: WorkflowStore
   private readonly runner: WorkflowRunner
-  private readonly native: NativeRuntime
+  private readonly harness: HarnessAdapter
   private readonly repo: WorkflowRepository
   private readonly instanceID: string
   private readonly now: () => number
@@ -133,18 +132,14 @@ export class WorkflowService {
     this.project = deps.project
     this.store = deps.store
     this.runner = deps.runner
-    this.native = deps.native
+    this.harness = deps.harness
     this.repo = deps.repo
     this.instanceID = deps.instanceID
     this.now = deps.now ?? Date.now
   }
 
   private async validationContext() {
-    const [agents, defaultModel] = await Promise.all([
-      this.native.listAgents(),
-      this.native.getDefaultModel().catch(() => undefined),
-    ])
-    return { agents, hasDefaultModel: defaultModel !== undefined }
+    return { agents: await this.harness.listAgents() }
   }
 
   private async validate(
@@ -152,7 +147,7 @@ export class WorkflowService {
     context: Awaited<ReturnType<WorkflowService["validationContext"]>>,
     bytes: number,
   ): Promise<WorkflowValidation & { dependencies: NonNullable<RunRecord["workflowDependencies"]> }> {
-    const options = { hasDefaultModel: context.hasDefaultModel }
+    const options = { resultsSupported: this.harness.capabilities.results.mechanism !== "none" }
     const root = validateWorkflow(workflow, context.agents, options)
     const dependencies: NonNullable<RunRecord["workflowDependencies"]> = {}
     const stack = new Set([workflow.name])
@@ -235,7 +230,7 @@ export class WorkflowService {
         })
       }
     }
-    return { workflows, directory: path.join(".opencode", "workflows") }
+    return { workflows, directory: this.repo.relativeRoot }
   }
 
   async getWorkflow(workflowID: string): Promise<WorkflowView> {
@@ -323,6 +318,7 @@ export class WorkflowService {
       const existing = indexed ?? (runs ?? await this.store.listRuns(projectID)).find((run) => run.requestID === requestID)
       if (existing) {
         this.ensureProject(existing)
+        await this.ensureHarness(existing)
         if (existing.requestHash !== requestHash) throw new IdempotencyConflictError()
       }
       return existing
@@ -386,9 +382,19 @@ export class WorkflowService {
       }
 
       await this.store.putSource(projectID, runID, workflow.source)
-      const created = await this.store.createRun(RunRecordSchema.parse(run))
-      await this.store.setIdempotency(projectID, idemHash, runID)
-      return { run: created, existing: false }
+      const harness = {
+        id: this.harness.capabilities.id,
+        ...(this.harness.capabilities.version === undefined ? {} : { version: this.harness.capabilities.version }),
+      }
+      await this.store.putRunHarness(projectID, runID, harness)
+      try {
+        const created = await this.store.createRun(RunRecordSchema.parse(run))
+        await this.store.setIdempotency(projectID, idemHash, runID)
+        return { run: created, existing: false }
+      } catch (error) {
+        await this.store.removeRunHarness(projectID, runID).catch(() => undefined)
+        throw error
+      }
     })
 
     if (existing) await this.startExisting(created)
@@ -409,6 +415,25 @@ export class WorkflowService {
     if (run.project.canonical !== this.project.canonical) throw new RunNotFoundError(run.runID)
   }
 
+  private async ownsHarness(run: RunRecord): Promise<boolean> {
+    const owner = await this.store.getRunHarness(this.project.id, run.runID)
+    if (owner) return owner.id === this.harness.capabilities.id
+    return this.harness.capabilities.sessions.adoptLegacyRuns
+  }
+
+  private async ensureHarness(run: RunRecord): Promise<void> {
+    const owner = await this.store.getRunHarness(this.project.id, run.runID)
+    if (owner) {
+      if (owner.id !== this.harness.capabilities.id) {
+        throw new NotResumableError(`run belongs to harness "${owner.id}", not "${this.harness.capabilities.id}"`)
+      }
+      return
+    }
+    if (!this.harness.capabilities.sessions.adoptLegacyRuns) {
+      throw new NotResumableError("run predates harness identity and cannot be resumed by this harness")
+    }
+  }
+
   async listRuns(status?: RunStatus, limit = 50): Promise<RunSummary[]> {
     const runs = await this.store.listRuns(this.project.id)
     return runs
@@ -425,20 +450,22 @@ export class WorkflowService {
     const steps = activeSteps(run)
     const currentSteps = (await Promise.all(steps.map((step) => this.store.getStep(this.project.id, run.runID, step.stepID))))
       .filter((step): step is StepRecord => step !== undefined)
+    const owned = await this.ownsHarness(run)
     return {
       run,
       currentStep: currentSteps.find((step) => step.stepID === run.activeStep?.stepID) ?? null,
       currentSteps,
       blockers: blockersOf(run),
-      pendingPermissions: await this.runner.livePermissions(run),
+      pendingPermissions: owned ? await this.runner.livePermissions(run) : run.pendingPermissions,
       mermaid: renderMermaid(buildGraph(run.workflowSnapshot)),
-      resumable: isResumable(run),
+      resumable: owned && isResumable(run),
     }
   }
 
   async getRunGraph(runID: string): Promise<ReturnType<typeof buildRunGraph>> {
     const run = await this.requireRun(runID)
-    return buildRunGraph(run, await this.runner.livePermissions(run))
+    const permissions = (await this.ownsHarness(run)) ? await this.runner.livePermissions(run) : run.pendingPermissions
+    return buildRunGraph(run, permissions)
   }
 
   async getRunStep(runID: string, stepID: string): Promise<StepRecord> {

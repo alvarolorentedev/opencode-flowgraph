@@ -1,22 +1,20 @@
 import { Plugin } from "@opencode/plugin"
 import type { CapabilitiesOutput } from "./contract.js"
 import { FlowgraphRpc } from "./rpc.js"
-import { createRpcHandlers } from "./rpc/handlers.js"
+import { createRpcHandlers } from "./adapters/opencode/rpc/handlers.js"
 import { WorkflowService } from "./service.js"
 import { WorkflowRepository } from "./workflow/loader.js"
 import { HARD_LIMITS } from "./workflow/schema.js"
-import { WorkflowStore, type JsonValue, type StoragePort } from "./state/store.js"
+import { WorkflowStore, type StoragePort } from "./state/store.js"
 import { RunLockManager } from "./state/concurrency.js"
-import { createInvocationRegistry } from "./execution/report-tool.js"
-import { ReportTool } from "./execution/report-tool.js"
-import { registerToolHooks } from "./execution/tool-hooks.js"
+import { createInvocationRegistry, ReportIntake } from "./execution/report-intake.js"
+import { ReportTool } from "./adapters/opencode/report-tool.js"
+import { registerToolHooks } from "./adapters/opencode/tool-hooks.js"
 import { WorkflowRunner } from "./execution/runner.js"
-import { OpenCodeNativeRuntime } from "./execution/native-agents.js"
+import { OpenCodeAdapter, type OpenCodePluginContext } from "./adapters/opencode/runtime.js"
 import { runServerCommand } from "./server-command.js"
 import { newInstanceID } from "./util/ids.js"
 import { PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
-
-type OpenCodePluginContext = Parameters<Parameters<typeof Plugin.define>[0]["setup"]>[0]
 
 function storagePort(ctx: OpenCodePluginContext): StoragePort {
   return {
@@ -47,15 +45,16 @@ export default Plugin.define({
       directory: ctx.location.directory,
     }
     const store = new WorkflowStore(storagePort(ctx))
-    const native = new OpenCodeNativeRuntime(ctx)
+    const harness = new OpenCodeAdapter(ctx)
     const repo = new WorkflowRepository(ctx.location.project.directory)
     const locks = new RunLockManager()
     const invocations = createInvocationRegistry()
+    const intake = new ReportIntake(store, invocations)
     let emitRunUpdated: (payload: unknown) => Promise<void> = async () => undefined
 
     const runner = new WorkflowRunner({
       store,
-      native,
+      harness,
       locks,
       invocations,
       instanceID,
@@ -66,7 +65,7 @@ export default Plugin.define({
       },
     })
 
-    const reportTool = new ReportTool(ctx, store, invocations)
+    const reportTool = new ReportTool(ctx, intake)
     await reportTool.register()
     await reportTool.requireTool()
     const protectedPaths = Array.isArray(ctx.options.protectedPaths)
@@ -83,7 +82,7 @@ export default Plugin.define({
       project,
       store,
       runner,
-      native,
+      harness,
       repo,
       instanceID,
       emit: (payload) => emitRunUpdated(payload),

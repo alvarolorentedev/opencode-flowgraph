@@ -1,6 +1,6 @@
-import type { CapabilitiesOutput } from "../contract.js"
-import type { WorkflowService } from "../service.js"
-import { FlowgraphRpc } from "../rpc.js"
+import type { CapabilitiesOutput } from "../../../contract.js"
+import type { WorkflowService } from "../../../service.js"
+import { FlowgraphRpc } from "./index.js"
 import { toRpcError, type ErrorContext } from "./errors.js"
 
 export function createRpcHandlers(service: WorkflowService, capabilities: CapabilitiesOutput) {

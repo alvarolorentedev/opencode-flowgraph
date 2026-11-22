@@ -1,6 +1,6 @@
 import path from "node:path"
-import type { OpenCodePluginContext } from "./native-agents.js"
-import type { InvocationRegistry } from "./report-tool.js"
+import type { OpenCodePluginContext } from "./runtime.js"
+import type { InvocationRegistry } from "../../execution/report-intake.js"
 
 export type ToolHookOptions = {
   allowBackgroundWork: boolean

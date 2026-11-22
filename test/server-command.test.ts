@@ -7,8 +7,8 @@ import { runServerCommand } from "../src/server-command.js"
 import { WorkflowRunner } from "../src/execution/runner.js"
 import { RunLockManager } from "../src/state/concurrency.js"
 import { WorkflowStore } from "../src/state/store.js"
-import { createInvocationRegistry } from "../src/execution/report-tool.js"
-import { FakeNative } from "./fixtures/fake-native.js"
+import { createInvocationRegistry, ReportIntake } from "../src/execution/report-intake.js"
+import { FakeHarness } from "./fixtures/fake-harness.js"
 import { MemoryStorage, source } from "./fixtures/memory.js"
 import { WorkflowRepository } from "../src/workflow/loader.js"
 
@@ -27,14 +27,15 @@ async function setup() {
   const project = { id: "prj_1", canonical: directory, directory }
   const storage = new MemoryStorage()
   const store = new WorkflowStore(storage)
-  const native = new FakeNative(store, project.id, () => ({
+  const invocations = createInvocationRegistry()
+  const intake = new ReportIntake(store, invocations)
+  const native = new FakeHarness(intake, () => ({
     report: { outcome: "done", summary: "ok", feedback: "", evidence: [] },
   }))
   const locks = new RunLockManager()
-  const invocations = createInvocationRegistry()
   const runner = new WorkflowRunner({
     store,
-    native,
+    harness: native,
     locks,
     invocations,
     emit: async () => undefined,
@@ -46,7 +47,7 @@ async function setup() {
     project,
     store,
     runner,
-    native,
+    harness: native,
     repo,
     instanceID: "inst_test",
     emit: async () => undefined,

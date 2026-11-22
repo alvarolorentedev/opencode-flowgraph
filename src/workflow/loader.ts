@@ -285,9 +285,18 @@ export class WorkflowRepository {
   readonly root: string
   private readonly projectDirectory: string
 
-  constructor(projectDirectory: string) {
+  constructor(projectDirectory: string, options: { root?: string } = {}) {
     this.projectDirectory = path.resolve(projectDirectory)
-    this.root = path.join(this.projectDirectory, ".opencode", "workflows")
+    this.root = options.root === undefined
+      ? path.join(this.projectDirectory, ".opencode", "workflows")
+      : path.resolve(this.projectDirectory, options.root)
+    if (!inside(this.projectDirectory, this.root)) {
+      throw new WorkflowFileError("workflow directory resolves outside the project", "unsafe_path")
+    }
+  }
+
+  get relativeRoot(): string {
+    return (path.relative(this.projectDirectory, this.root) || ".").split(path.sep).join("/")
   }
 
   private validateId(workflowID: string): string {

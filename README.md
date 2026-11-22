@@ -31,6 +31,8 @@ You bring two things:
 
 The plugin validates the graph, then runs one node at a time. Agent nodes use a fresh OpenCode session; human nodes wait for a decision. Each node reports an outcome. The validated graph — not the agent — decides where the run goes next. State is checkpointed after every step, so runs can pause and recover without losing completed work.
 
+Flowgraph is split into a portable workflow core and a harness adapter. The core owns graphs, scheduling, checkpoints, recovery, and structured outcomes. The adapter owns native agents, sessions, models, permissions, and tools. OpenCode is the reference adapter and the only adapter implemented today. See [`docs/architecture.md`](docs/architecture.md) and [`docs/adapters.md`](docs/adapters.md); other harnesses are not supported yet.
+
 ## Onboarding
 
 ### 1. Install the plugin
@@ -147,7 +149,9 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 | [Workflow guide](docs/guide.md) | Agents, human steps, YAML schema, routing, outcomes, limits, examples |
 | [Operations](docs/operations.md) | Execution, recovery, storage, concurrency, permissions, guardrails |
 | [Interfaces](docs/interfaces.md) | RPC, `/flowgraph` command, TUI, Desktop GUI, Mermaid |
-| [Development](docs/development.md) | Architecture, local development, migration, releasing |
+| [Architecture](docs/architecture.md) | Core/adapter boundary, runtime contract, storage, recovery, security |
+| [Adapters](docs/adapters.md) | Implementing a harness adapter, result transports, compatibility notes |
+| [Development](docs/development.md) | Module map, local development, migration, releasing |
 
 ## License
 

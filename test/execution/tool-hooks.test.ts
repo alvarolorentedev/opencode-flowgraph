@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { registerToolHooks } from "../../src/execution/tool-hooks.js"
-import { createInvocationRegistry } from "../../src/execution/report-tool.js"
+import { registerToolHooks } from "../../src/adapters/opencode/tool-hooks.js"
+import { createInvocationRegistry } from "../../src/execution/report-intake.js"
 
 type Hook = (event: {
   tool: string

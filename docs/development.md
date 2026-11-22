@@ -15,12 +15,15 @@
 | `workflow/loader.ts` | Safe YAML parsing, discovery, hashing, atomic file operations |
 | `workflow/graph.ts` | Pure graph construction, validation, transition resolution |
 | `workflow/mermaid.ts` | Pure, escaped, deterministic Mermaid generation |
-| `workflow/validator.ts` | Semantic validation and native agent resolution |
-| `execution/native-agents.ts` | Typed adapter over OpenCode agents, sessions, and permissions |
-| `execution/report-tool.ts` | `flowgraph_report` tool and active-session registry |
-| `execution/tool-hooks.ts` | Workflow-session background-work policy and protected configuration guard |
-| `execution/prompts.ts` | Bounded context handoff prompts |
-| `execution/results.ts` | Result/audit summarization and usage estimates |
+| `workflow/validator.ts` | Semantic validation and adapter agent resolution |
+| `execution/harness.ts` | Portable `HarnessAdapter` contract and capabilities |
+| `execution/report-intake.ts` | Structured-result validation, attribution, dedupe, and persistence |
+| `adapters/opencode/runtime.ts` | OpenCode `HarnessAdapter` over native agents, sessions, and permissions |
+| `adapters/opencode/report-tool.ts` | OpenCode `flowgraph_report` tool |
+| `adapters/opencode/tool-hooks.ts` | Workflow-session background-work policy and protected configuration guard |
+| `adapters/opencode/results.ts` | OpenCode usage/audit normalization |
+| `execution/prompts.ts` | Bounded context handoff prompts with adapter-supplied completion text |
+| `execution/results.ts` | Portable usage merge and outcome assertion |
 | `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, controls |
 | `ui/runs.ts` | Cross-project/worktree run discovery, merge, and ordering |
 | `ui/graph.ts` | Pure boxed terminal diagram: ranking, rails, tones, width/height fallback |
@@ -28,19 +31,19 @@
 | `gui.tsx` | Experimental Desktop GUI run picker, panel, and Mermaid renderer |
 | `execution/runner.ts` | Concurrent session scheduler, controls, limits, and recovery |
 | `execution/checkpoint.ts` | Durable branch, call, and join transitions |
-| `state/store.ts` | Project-scoped records with revisioned run mutations |
+| `state/store.ts` | Project-scoped records, revisioned mutations, and harness sidecar |
 | `state/concurrency.ts` | Host-local run ownership lock |
 | `service.ts` | Workflow discovery/validation and run control facade |
-| `rpc.ts` | Shared `Rpc.define` contract |
 | `contract.ts` | Shared Zod schemas and exported types |
-| `rpc/handlers.ts` | Thin RPC handlers and error mapping |
-| `index.ts` | Plugin setup, tool/RPC registration, recovery scheduling, cleanup |
+| `adapters/opencode/rpc/` | OpenCode `Rpc.define` contract, handlers, and error mapping |
+| `rpc.ts` | Public re-export of the OpenCode RPC contract |
+| `index.ts` | OpenCode plugin composition root |
 
 ### Structured result boundary
 
-V2 agent prompts do not have a native response schema. The plugin uses a typed tool whose input is validated by OpenCode and persisted by the plugin. Free-form phrases such as `DONE` or `LGTM` are never parsed.
+Agent prompts do not have a universal native response schema. The core owns `ReportIntake`, which validates outcomes, attributes reports to the active run/step/session, deduplicates by native tool-call ID, and persists one report per step. Each adapter transports the report using its native mechanism: a typed tool, native structured output, or a client-provided MCP tool.
 
-The tool is location-wide because OpenCode plugin tools are not session-scoped. Executors reject calls outside an active workflow node session, and background `subagent`/`shell` calls are rejected inside workflow sessions by default.
+Free-form phrases such as `DONE` or `LGTM` are never parsed. The graph, not the agent, chooses the next node.
 
 ## Local development
 
@@ -64,11 +67,29 @@ The opt-in model-routing integration uses a local OpenAI-compatible mock server 
 OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=/path/to/opencode bun run test:integration
 ```
 
-It checks the model IDs and variant sent in actual inference requests. The default unit suite still uses `FakeNative` and does not require an OpenCode binary.
+It checks the model IDs and variant sent in actual inference requests. The default unit suite still uses `FakeHarness` and does not require an OpenCode binary.
 
 A real-model end-to-end verification is manual: define two primary agents, create the workflow, start a run through RPC, verify the review loop, disconnect the client, restart the server, and confirm conservative recovery. See [`operations.md`](operations.md) and [`interfaces.md`](interfaces.md).
 
 A local plugin entry needs a root `index.ts` (server) and `rpc.ts` (shared contract); this repository provides both.
+
+### Development workflows
+
+The project's `.opencode/agents` and `.opencode/workflows` run flowgraph on
+itself. `opencode.jsonc` declares the published plugin, so OpenCode installs it
+when the project loads.
+
+- `development` — PO scope, UX contract, implementer, validator, reviewer, ship.
+- `fix` — implementer, validator, ship. Use it for small isolated changes.
+
+Run `/flowgraph run development "<objective>"` or
+`/flowgraph run fix "<objective>"`. `/flowgraph` lists runs, opens node
+sessions, and pauses or resumes them. The workflows use native permissions and
+never approve a request for you. Workflow sessions cannot edit `.opencode`,
+`opencode.json(c)`, `AGENTS.md`, `.github`, or `.git`.
+
+The OpenCode server process needs `bun` and `gh` on `PATH`; the agents run the
+repository checks directly.
 
 ## Migrating from 0.1.x
 

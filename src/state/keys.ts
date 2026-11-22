@@ -24,6 +24,9 @@ export const StorageKeys = {
   source(projectID: string, runID: string): string {
     return `${ROOT}/run-sources/${safeSegment(projectID)}/${runID}`
   },
+  runHarness(projectID: string, runID: string): string {
+    return `${ROOT}/run-harness/${safeSegment(projectID)}/${runID}`
+  },
   backup(projectID: string, workflowID: string, hash: string): string {
     return `${ROOT}/workflow-backups/${safeSegment(projectID)}/${workflowID}/${hash}`
   },

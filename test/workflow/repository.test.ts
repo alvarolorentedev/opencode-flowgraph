@@ -48,6 +48,16 @@ describe("WorkflowRepository", () => {
     await expect(repo.read("sample")).rejects.toMatchObject({ code: "not_found" })
   })
 
+  it("supports a custom workflow root inside the project", async () => {
+    const project = await tempProject()
+    const repo = new WorkflowRepository(project, { root: ".flowgraph/workflows" })
+    const created = await repo.save("sample", valid, null)
+    expect(created.id).toBe("sample")
+    expect(repo.relativeRoot).toBe(".flowgraph/workflows")
+    expect((await repo.read("sample")).workflow?.name).toBe("sample")
+    expect(() => new WorkflowRepository(project, { root: "../outside" })).toThrow(/outside the project/)
+  })
+
   it("rejects invalid IDs and symlinked workflow files", async () => {
     const project = await tempProject()
     const repo = new WorkflowRepository(project)

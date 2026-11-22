@@ -1,3 +1,4 @@
+import { z } from "zod"
 import { KeyedMutex } from "../util/mutex.js"
 import { StorageKeys } from "./keys.js"
 import {
@@ -28,6 +29,14 @@ export interface StoragePort {
   remove(key: string): Promise<void>
   scan(options: { prefix: string; after?: string; limit?: number }): Promise<StorageScanResult>
 }
+
+export const RunHarnessSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    version: z.string().min(1).max(64).optional(),
+  })
+  .strict()
+export type RunHarness = z.infer<typeof RunHarnessSchema>
 
 export class StateCorruptionError extends Error {
   constructor(
@@ -64,6 +73,20 @@ export class WorkflowStore {
 
   async getRun(projectID: string, runID: string): Promise<RunRecord | undefined> {
     return this.readSchema(StorageKeys.run(projectID, runID), RunRecordSchema)
+  }
+
+  async getRunHarness(projectID: string, runID: string): Promise<RunHarness | undefined> {
+    return this.readSchema(StorageKeys.runHarness(projectID, runID), RunHarnessSchema)
+  }
+
+  async putRunHarness(projectID: string, runID: string, value: RunHarness): Promise<RunHarness> {
+    const parsed = RunHarnessSchema.parse(value)
+    await this.storage.set(StorageKeys.runHarness(projectID, runID), jsonClone(parsed))
+    return parsed
+  }
+
+  async removeRunHarness(projectID: string, runID: string): Promise<void> {
+    await this.storage.remove(StorageKeys.runHarness(projectID, runID))
   }
 
   async createRun(run: RunRecord): Promise<RunRecord> {

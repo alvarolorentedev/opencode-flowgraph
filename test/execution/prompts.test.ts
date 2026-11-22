@@ -23,6 +23,7 @@ describe("node prompts", () => {
       previous: [
         { nodeID: "developer", outcome: "done", summary: "changed files", feedback: "" },
       ],
+      completionInstruction: "Call the `flowgraph_report` tool exactly once.",
     })
     expect(prompt).toContain("implement the feature")
     expect(prompt).toContain("sess_run")
@@ -48,6 +49,7 @@ describe("node prompts", () => {
       nodeSessionID: "sess_node",
       previousSessions: [],
       previous: [],
+      completionInstruction: "Call the `flowgraph_report` tool exactly once.",
     })
     expect(prompt.length).toBeLessThanOrEqual(32 * 1024)
     expect(prompt).toContain("[truncated]")
@@ -57,7 +59,7 @@ describe("node prompts", () => {
   it("builds a bounded correction prompt", () => {
     const workflow = parseWorkflowSource(source, { workflowID: "sample" }).workflow!
     const graph = buildGraph(workflow)
-    const prompt = buildReportCorrectionPrompt(graph, "reviewer")
+    const prompt = buildReportCorrectionPrompt(graph, "reviewer", "Call the `flowgraph_report` tool exactly once.")
     expect(prompt).toContain("flowgraph_report")
     expect(prompt).toContain("approved")
   })

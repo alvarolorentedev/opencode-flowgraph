@@ -26,11 +26,14 @@ v1/runs/<projectID>/<runID>
 v1/steps/<projectID>/<runID>/<stepID>
 v1/reports/<projectID>/<runID>/<stepID>
 v1/run-sources/<projectID>/<runID>
+v1/run-harness/<projectID>/<runID>
 v1/workflow-backups/<projectID>/<workflowID>/<hash>
 v1/idem/<projectID>/<sha256(requestID)>
 ```
 
 Workflow definitions remain YAML files in `.opencode/workflows`. Runtime checkpoints are never written into the repository.
+
+The `run-harness` sidecar records which adapter created a run. `RunRecord` is unchanged, so existing runs and older binaries remain compatible; older binaries simply ignore the sidecar. No migration is required. A run without a sidecar is a legacy run: OpenCode adopts it; a different adapter refuses to resume it. This prevents one harness from controlling another harness's native sessions.
 
 Storage has no transactions or compare-and-swap. A host-local file lock protects ownership of each run. After an unclean shutdown, recovery retries busy run locks until they become available. In-process serialization protects run transitions, idempotent start admission, and the stored-run cap. Control RPCs require the current revision. Use one OpenCode server per project database.
 
@@ -46,6 +49,8 @@ Storage has no transactions or compare-and-swap. A host-local file lock protects
 | No terminal idle outcome | Block with `ambiguous_node` |
 | Branch waiting at a human step | Preserve the `human_input` blocker; do not prompt |
 | Branch arrived at a join | Preserve the arrival and reconcile outstanding branches |
+| Permission state cannot be proven | Block; `resume` refuses |
+| Run belongs to another harness | Read-only; `resume` and control refuse |
 | Recovery attempts exhausted | Fail with `recovery_exhausted` |
 | Run deadline expired | Fail with `run_timeout` |
 
@@ -53,7 +58,7 @@ Recovery preserves completed steps and join arrivals. A step that finished befor
 
 `resumeRun` with `confirmRetry: true` retries ambiguous steps in new sessions after their prior sessions are confirmed stopped. Resolve any pending native permissions before resuming.
 
-Node sessions are child sessions of the workflow-run session. OpenCode's native restart sweep resumes top-level orphaned claims and releases orphaned child claims, so the workflow plugin owns node-session reconciliation.
+Node sessions are child sessions of the workflow-run session. OpenCode's native restart sweep resumes top-level orphaned claims and releases orphaned child claims, so the OpenCode adapter owns node-session reconciliation.
 
 ## Failure boundaries
 

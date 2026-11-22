@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { WorkflowStore } from "../../src/state/store.js"
 import { RunLockManager } from "../../src/state/concurrency.js"
-import { createInvocationRegistry } from "../../src/execution/report-tool.js"
+import { createInvocationRegistry, ReportIntake } from "../../src/execution/report-intake.js"
 import { WorkflowRunner, type RunUpdatedPayload } from "../../src/execution/runner.js"
-import { FakeNative, type Behavior } from "../fixtures/fake-native.js"
+import { FakeHarness, type Behavior } from "../fixtures/fake-harness.js"
 import { MemoryStorage, makeRunRecord, source, waitForRun } from "../fixtures/memory.js"
 import { parseWorkflowSource } from "../../src/workflow/loader.js"
 import { RunRecordSchema, type RunRecord } from "../../src/state/types.js"
@@ -19,14 +19,15 @@ afterEach(async () => {
 function setup(scenario: (input: { nodeID: string; agent: string }, callIndex: number) => Behavior) {
   const storage = new MemoryStorage()
   const store = new WorkflowStore(storage)
-  const native = new FakeNative(store, "prj_1", (log, index) => scenario(log, index))
-  const locks = new RunLockManager()
   const invocations = createInvocationRegistry()
+  const intake = new ReportIntake(store, invocations)
+  const native = new FakeHarness(intake, (log, index) => scenario(log, index))
+  const locks = new RunLockManager()
   const events: RunUpdatedPayload[] = []
   const newRunner = () => {
     const runner = new WorkflowRunner({
       store,
-      native,
+      harness: native,
       locks,
       invocations,
       emit: async (event) => {
@@ -284,21 +285,31 @@ limits: { max_steps: 2, timeout_seconds: 60 }
 nodes:
   a: { agent: developer, next: complete }
 `
-    const { store, native, runner } = setup(() => ({
+    const { store, native, runner, invocations } = setup(() => ({
       report: { outcome: "done", summary: "done", feedback: "", evidence: [] },
     }))
     const run = await createRun(store, {}, workflow)
-    const root = await native.createRootSession({ title: "root", metadata: {} })
-    const node = await native.createSession({ parentID: root.id, agent: "developer", title: "a", metadata: {} })
+    const root = await native.createRunScope!({ title: "root", metadata: {} })
+    const node = await native.createSession({ parent: root.ref, agentRef: "developer", title: "a", metadata: {} })
     const stepID = "step_000001_a001"
-    await native.prompt({
-      sessionID: node.id,
-      messageID: "msg_recovery_1",
+    invocations.register({
+      runID: run.runID,
+      projectID: "prj_1",
+      stepID,
+      sessionID: node.ref,
+      nodeID: "a",
+      allowedOutcomes: [],
+      attempt: 1,
+      reported: 0,
+    })
+    await native.submit({
+      session: node.ref,
+      submission: "msg_recovery_1",
       text: "do it",
       metadata: { runID: run.runID, stepID, nodeID: "a" },
     })
     const seeded = await store.mutateRun("prj_1", run.runID, null, (draft) => {
-      draft.runSessionID = root.id
+      draft.runSessionID = root.ref
       draft.currentNode = "a"
       draft.nextNode = "a"
       draft.stepCount = 1
@@ -308,7 +319,7 @@ nodes:
         attempt: 1,
         nodeID: "a",
         agentID: "developer",
-        sessionID: node.id,
+        sessionID: node.ref,
         promptMessageID: "msg_recovery_1",
         phase: "prompted",
         startedAt: 1_000,
@@ -391,10 +402,10 @@ nodes:
 `
     const { store, native, runner } = setup(() => ({ delayMs: 10_000 }))
     const run = await createRun(store, {}, workflow)
-    const root = await native.createRootSession({ title: "root", metadata: {} })
-    const node = await native.createSession({ parentID: root.id, agent: "developer", title: "a", metadata: {} })
+    const root = await native.createRunScope!({ title: "root", metadata: {} })
+    const node = await native.createSession({ parent: root.ref, agentRef: "developer", title: "a", metadata: {} })
     await store.mutateRun("prj_1", run.runID, null, (draft) => {
-      draft.runSessionID = root.id
+      draft.runSessionID = root.ref
       draft.currentNode = "a"
       draft.nextNode = "a"
       draft.stepCount = 1
@@ -404,7 +415,7 @@ nodes:
         attempt: 1,
         nodeID: "a",
         agentID: "developer",
-        sessionID: node.id,
+        sessionID: node.ref,
         promptMessageID: "msg_ambiguous_1",
         phase: "prompted",
         startedAt: 1_000,

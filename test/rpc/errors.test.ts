@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { ProjectBusyError } from "../../src/state/concurrency.js"
 import { InvalidHumanResponseError } from "../../src/execution/runner.js"
-import { toRpcError, type ErrorContext } from "../../src/rpc/errors.js"
+import { toRpcError, type ErrorContext } from "../../src/adapters/opencode/rpc/errors.js"
 
 function recorder() {
   const calls: Array<{ type: string; message: string; data?: unknown }> = []

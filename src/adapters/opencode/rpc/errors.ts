@@ -1,13 +1,13 @@
-import { WorkflowFileError } from "../workflow/loader.js"
-import { StateCorruptionError, RevisionConflictError } from "../state/store.js"
-import { ProjectBusyError, RunOwnershipError } from "../state/concurrency.js"
+import { WorkflowFileError } from "../../../workflow/loader.js"
+import { StateCorruptionError, RevisionConflictError } from "../../../state/store.js"
+import { ProjectBusyError, RunOwnershipError } from "../../../state/concurrency.js"
 import {
   AmbiguousResumeError,
   InvalidHumanResponseError,
   NotResumableError,
   PermissionPendingError,
   RunNotFoundError,
-} from "../execution/runner.js"
+} from "../../../execution/runner.js"
 import {
   IdempotencyConflictError,
   InvalidStateError,
@@ -15,8 +15,8 @@ import {
   StaleWorkflowError,
   TooManyRunsError,
   WorkflowNotFoundError,
-} from "../service.js"
-import { errorMessage } from "../util/redact.js"
+} from "../../../service.js"
+import { errorMessage } from "../../../util/redact.js"
 
 export type ErrorContext = {
   error(type: string, message: string, data?: unknown): unknown

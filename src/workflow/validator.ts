@@ -1,12 +1,19 @@
-import type { Agent } from "@opencode/plugin"
 import { buildGraph, validateGraph, type Diagnostic, type WorkflowGraph } from "./graph.js"
 import type { WorkflowDefinition } from "./schema.js"
+
+export type AgentMode = "subagent" | "primary" | "all"
 
 export type AgentDescriptor = {
   id: string
   name: string
-  mode: "subagent" | "primary" | "all"
-  hidden: boolean
+
+  /** Preferred: the adapter decides selectability. */
+  selectable?: boolean
+  reason?: { code: string; message: string }
+
+  /** OpenCode-compatible metadata; optional and ignored by other adapters. */
+  mode?: AgentMode
+  hidden?: boolean
   model?: { providerID: string; id: string; variant?: string }
   description?: string
 }
@@ -14,7 +21,7 @@ export type AgentDescriptor = {
 export type AgentResolution = {
   agentID: string
   resolved: boolean
-  mode?: Agent.Info["mode"]
+  mode?: AgentMode
   hidden?: boolean
   name?: string
   error?: string
@@ -53,6 +60,35 @@ export function resolveAgents(
       })
       continue
     }
+
+    // Adapters that understand their own selectability take precedence.
+    if (agent.selectable !== undefined) {
+      if (agent.selectable) {
+        resolutions.push({
+          agentID: node.agent,
+          resolved: true,
+          ...(agent.mode === undefined ? {} : { mode: agent.mode }),
+          ...(agent.hidden === undefined ? {} : { hidden: agent.hidden }),
+          name: agent.name,
+        })
+        continue
+      }
+      resolutions.push({
+        agentID: node.agent,
+        resolved: false,
+        ...(agent.mode === undefined ? {} : { mode: agent.mode }),
+        ...(agent.hidden === undefined ? {} : { hidden: agent.hidden }),
+        name: agent.name,
+        error: agent.reason?.message ?? "agent is not selectable",
+      })
+      errors.push({
+        path: `nodes.${nodeId}.agent`,
+        message: agent.reason?.message ?? `agent "${node.agent}" is not selectable`,
+        code: agent.reason?.code ?? "agent_unavailable",
+      })
+      continue
+    }
+
     if (agent.hidden) {
       resolutions.push({
         agentID: node.agent,
@@ -100,7 +136,7 @@ export function resolveAgents(
         path: `nodes.${nodeId}.agent`,
         message:
           `agent "${node.agent}" has no model and no default model is configured; ` +
-          `set a model on the agent or set "model" in opencode.json(c).`,
+          `set a model on the agent or set "model" in the native configuration.`,
         code: "agent_missing_model",
       })
       continue
@@ -120,13 +156,24 @@ export function resolveAgents(
 export function validateWorkflow(
   workflow: WorkflowDefinition,
   agents: readonly AgentDescriptor[],
-  options: { hasDefaultModel?: boolean } = {},
+  options: { hasDefaultModel?: boolean; resultsSupported?: boolean } = {},
 ): WorkflowValidation {
   const graph = buildGraph(workflow)
   const graphResult = validateGraph(workflow, graph)
   const agentResult = resolveAgents(workflow, agents, options)
   const errors = [...graphResult.errors, ...agentResult.errors]
   const warnings = [...graphResult.warnings, ...graph.warnings]
+
+  if (options.resultsSupported === false) {
+    for (const [nodeID, node] of Object.entries(workflow.nodes)) {
+      if (!("agent" in node)) continue
+      errors.push({
+        path: `nodes.${nodeID}.agent`,
+        message: "the selected harness cannot return structured results for agent nodes",
+        code: "harness_results_unsupported",
+      })
+    }
+  }
 
   return {
     valid: errors.length === 0,

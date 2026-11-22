@@ -18,11 +18,13 @@ export type NodePromptInput = {
   stepIndex: number
   maxSteps: number
   objective: string
-  runSessionID: string
+  runSessionID?: string
   nodeSessionID: string
   previousSessions: string[]
   previous: PromptPreviousResult[]
   joined?: boolean
+  harnessName?: string
+  completionInstruction: string
 }
 
 export function truncateUtf8(value: string, maxBytes: number): string {
@@ -71,13 +73,14 @@ export function buildNodePrompt(input: NodePromptInput): string {
   const prompt = [
     `# Workflow node: ${input.nodeID}`,
     ``,
-    `You are executing one node of an OpenCode multi-agent workflow.`,
+    `You are executing one node of a multi-agent workflow.`,
+    `Harness: ${input.harnessName ?? "native"}`,
     `Workflow: ${input.workflow.name} (${input.workflow.description ?? "no description"})`,
     `Run: ${input.runID}`,
     `Node: ${input.nodeID}`,
     `Agent: ${node.agent}`,
     `Step: ${input.stepIndex} of at most ${input.maxSteps}`,
-    `Run session: ${input.runSessionID}`,
+    ...(input.runSessionID === undefined ? [] : [`Run session: ${input.runSessionID}`]),
     `This node session: ${input.nodeSessionID}`,
     `Previous node sessions: ${sessions}`,
     ``,
@@ -94,15 +97,9 @@ export function buildNodePrompt(input: NodePromptInput): string {
     ``,
     `## Your task`,
     `1. Perform your native agent role for the objective and the relevant previous results.`,
-    `2. Do not edit workflow files, agent definition files, or OpenCode configuration.`,
+    `2. Do not edit workflow files, agent definition files, or harness configuration.`,
     `3. Do not create Git branches, commits, pushes, pull requests, or worktrees unless your native agent role explicitly requires it.`,
-    `4. When you are finished, call the \`flowgraph_report\` tool exactly once with:`,
-    `   {`,
-    `     "outcome": "<outcome>",`,
-    `     "summary": "<concise summary of what you did or found>",`,
-    `     "feedback": "<actionable feedback for the next node, or empty>",`,
-    `     "evidence": [{ "kind": "file|command|url|note", "value": "<short reference>" }]`,
-    `   }`,
+    `4. ${input.completionInstruction}`,
     `5. ${outcomeInstruction}`,
     `6. Evidence is reported by you. Do not claim a test passed merely because you ran a command; state what you observed.`,
     `7. If you cannot complete the node, report the outcome your workflow declares for being blocked, or explain the blocker in feedback.`,
@@ -114,14 +111,18 @@ export function buildNodePrompt(input: NodePromptInput): string {
   return truncateUtf8(prompt, HARD_LIMITS.maxPromptBytes)
 }
 
-export function buildReportCorrectionPrompt(graph: WorkflowGraph, nodeID: string): string {
+export function buildReportCorrectionPrompt(
+  graph: WorkflowGraph,
+  nodeID: string,
+  completionInstruction: string,
+): string {
   const outcomes = validOutcomes(graph, nodeID)
   return [
     `You finished the workflow node but did not submit a valid structured result.`,
-    `Call the \`flowgraph_report\` tool now, exactly once.`,
+    `Return the result now. Do not perform additional work. Do not repeat completed work.`,
+    completionInstruction,
     outcomes.length === 0
       ? `Use outcome "done".`
       : `Use one of these outcomes: ${outcomes.join(", ")}.`,
-    `Do not perform additional work. Do not repeat completed work.`,
   ].join("\n")
 }

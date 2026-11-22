@@ -6,8 +6,8 @@ import { WorkflowService, IdempotencyConflictError, InvalidWorkflowError } from 
 import { WorkflowRunner } from "../../src/execution/runner.js"
 import { RunLockManager } from "../../src/state/concurrency.js"
 import { WorkflowStore } from "../../src/state/store.js"
-import { createInvocationRegistry } from "../../src/execution/report-tool.js"
-import { FakeNative, type Behavior, type PromptLog } from "../fixtures/fake-native.js"
+import { createInvocationRegistry, ReportIntake } from "../../src/execution/report-intake.js"
+import { FakeHarness, type Behavior, type PromptLog } from "../fixtures/fake-harness.js"
 import { MemoryStorage, source, waitForRun } from "../fixtures/memory.js"
 import { WorkflowRepository } from "../../src/workflow/loader.js"
 
@@ -28,7 +28,9 @@ async function setup(scenario?: (input: PromptLog, count: number) => Behavior) {
   const project = { id: "prj_1", canonical: directory, directory }
   const storage = new MemoryStorage()
   const store = new WorkflowStore(storage)
-  const native = new FakeNative(store, project.id, scenario ?? ((input) => ({
+  const invocations = createInvocationRegistry()
+  const intake = new ReportIntake(store, invocations)
+  const native = new FakeHarness(intake, scenario ?? ((input) => ({
     report:
       input.agent === "developer"
         ? { outcome: "done", summary: "implemented", feedback: "", evidence: [] }
@@ -37,14 +39,14 @@ async function setup(scenario?: (input: PromptLog, count: number) => Behavior) {
   const repo = new WorkflowRepository(directory)
   const newService = () => {
     const runner = new WorkflowRunner({
-      store, native, locks: new RunLockManager(), invocations: createInvocationRegistry(),
+      store, harness: native, locks: new RunLockManager(), invocations,
       emit: async () => undefined,
       now: () => 2_000,
       options: { pollIntervalMs: 5, recoveryGraceMs: 50 },
     })
     runners.push(runner)
     const service = new WorkflowService({
-      project, store, runner, native, repo, instanceID: "inst_test",
+      project, store, runner, harness: native, repo, instanceID: "inst_test",
       emit: async () => undefined,
       now: () => 2_000,
     })

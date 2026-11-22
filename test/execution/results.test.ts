@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { addUsage, auditFromMessages, zeroUsage } from "../../src/execution/results.js"
+import { zeroUsage } from "../../src/execution/results.js"
+import { addUsage, auditFromMessages } from "../../src/adapters/opencode/results.js"
 
 describe("result audit and usage", () => {
   it("separates observed mutating tools from agent-reported evidence", () => {

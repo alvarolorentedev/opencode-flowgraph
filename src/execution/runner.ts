@@ -5,12 +5,12 @@ import { errorMessage, errorType } from "../util/redact.js"
 import { newMessageID, newStepID } from "../util/ids.js"
 import { buildGraph, resolveTransition, validOutcomes } from "../workflow/graph.js"
 import { buildNodePrompt, buildReportCorrectionPrompt } from "./prompts.js"
-import { auditFromMessages, latestIdle, mergeUsage, usageFromSession, zeroUsage } from "./results.js"
+import { mergeUsage, zeroUsage } from "./results.js"
 import { RevisionConflictError, type WorkflowStore } from "../state/store.js"
 import type { ActiveStep, Blocker, Branch, FailureInfo, PermissionSummary, RunRecord, RunStatus, StepRecord, StepSummary } from "../state/types.js"
 import { RunOwnershipError, type RunLock, type RunLockManager } from "../state/concurrency.js"
-import type { NativeRuntime, SessionSnapshot } from "./native-agents.js"
-import type { InvocationRegistry } from "./report-tool.js"
+import type { ExecutionSnapshot, HarnessAdapter } from "./harness.js"
+import type { InvocationRegistry } from "./report-intake.js"
 import { checkRunDeadline } from "./limits.js"
 import { activeSteps, advance, definitionOf, FrontierLimitError, initialize, projectCheckpoint, RepeatedTransitionError, trackTransition } from "./checkpoint.js"
 
@@ -34,7 +34,7 @@ export type RunnerOptions = {
 
 export type RunnerDeps = {
   store: WorkflowStore
-  native: NativeRuntime
+  harness: HarnessAdapter
   locks: RunLockManager
   invocations: InvocationRegistry
   emit: (payload: RunUpdatedPayload) => Promise<void>
@@ -135,7 +135,7 @@ function stepRecord(run: RunRecord, active: ActiveStep): StepRecord {
 
 export class WorkflowRunner {
   private readonly store: WorkflowStore
-  private readonly native: NativeRuntime
+  private readonly harness: HarnessAdapter
   private readonly invocations: InvocationRegistry
   private readonly now: () => number
   private readonly options: RunnerOptions
@@ -144,7 +144,7 @@ export class WorkflowRunner {
 
   constructor(private readonly deps: RunnerDeps) {
     this.store = deps.store
-    this.native = deps.native
+    this.harness = deps.harness
     this.invocations = deps.invocations
     this.now = deps.now ?? Date.now
     this.options = {
@@ -157,6 +157,27 @@ export class WorkflowRunner {
     const run = await this.store.getRun(projectID, runID)
     if (!run) throw new RunNotFoundError(runID)
     return run
+  }
+
+  private async ownsHarness(run: RunRecord): Promise<boolean> {
+    const owner = await this.store.getRunHarness(run.project.id, run.runID)
+    if (owner) return owner.id === this.harness.capabilities.id
+    return this.harness.capabilities.sessions.adoptLegacyRuns
+  }
+
+  private async assertHarness(run: RunRecord): Promise<void> {
+    const owner = await this.store.getRunHarness(run.project.id, run.runID)
+    if (owner) {
+      if (owner.id !== this.harness.capabilities.id) {
+        throw new NotResumableError(
+          `run belongs to harness "${owner.id}", not "${this.harness.capabilities.id}"`,
+        )
+      }
+      return
+    }
+    if (!this.harness.capabilities.sessions.adoptLegacyRuns) {
+      throw new NotResumableError("run predates harness identity and cannot be resumed by this harness")
+    }
   }
 
   private async update(run: RunRecord, mutate: (draft: RunRecord) => void): Promise<RunRecord> {
@@ -201,6 +222,7 @@ export class WorkflowRunner {
     await gate.run(key, async () => {
       if (owners.has(key)) return
       const run = await this.requireRun(projectID, runID)
+      await this.assertHarness(run)
       if (run.status === "paused" || (TERMINAL.has(run.status) && activeSteps(run).length === 0)) return
       const owner = await this.claim(key, run)
       this.launch(key, owner, run, options.recovery === true)
@@ -258,12 +280,15 @@ export class WorkflowRunner {
           if (branch.active && branch.active.phase !== "ambiguous") this.register(run, branch, branch.active)
         }
       }
-      if (!run.runSessionID && !checkRunDeadline(run, this.now())) {
-        const session = await this.native.createRootSession({
-          title: `Workflow ${run.workflowID} ${run.runID}`,
-          metadata: { plugin: "flowgraph", kind: "workflow-run", runID, workflowID: run.workflowID },
-        })
-        await this.update(run, (draft) => { draft.runSessionID = session.id })
+      if (!run.runSessionID && !checkRunDeadline(run, this.now()) && this.harness.capabilities.sessions.runScope) {
+        const createRunScope = this.harness.createRunScope
+        if (createRunScope) {
+          const session = await createRunScope.call(this.harness, {
+            title: `Workflow ${run.workflowID} ${run.runID}`,
+            metadata: { plugin: "flowgraph", kind: "workflow-run", runID, workflowID: run.workflowID },
+          })
+          await this.update(run, (draft) => { draft.runSessionID = session.ref })
+        }
       }
     })
 
@@ -332,6 +357,11 @@ export class WorkflowRunner {
     }
   }
 
+  private completionInstruction(nodeID: string, allowedOutcomes: string[]): string {
+    return this.harness.completionInstruction?.({ nodeID, allowedOutcomes })
+      ?? "Report the structured result for this node."
+  }
+
   private async admit(run: RunRecord, branch: Branch): Promise<RunRecord> {
     const nodeID = branch.nodeID
     const timeout = checkRunDeadline(run, this.now())
@@ -339,14 +369,14 @@ export class WorkflowRunner {
     if (run.stepCount >= run.maxSteps) return this.fail(run, this.stepLimit(run, nodeID))
     const workflow = definitionOf(run, branch.workflowID)
     const node = workflow.nodes[nodeID]
-    if (!node || !("agent" in node) || !run.runSessionID) throw new Error("expected an agent node and a run session")
+    if (!node || !("agent" in node)) throw new Error("expected an agent node")
 
-    const agent = await this.native.getAgent(node.agent)
-    if (!agent || agent.hidden || agent.mode === "subagent") {
-      return this.fail(run, { code: "agent_unavailable", message: `agent "${node.agent}" is unavailable or not selectable`, nodeID })
+    const agent = await this.harness.resolveAgent(node.agent)
+    const selectable = agent?.selectable ?? (agent !== undefined && !agent.hidden && agent.mode !== "subagent")
+    if (!agent || !selectable) {
+      const message = agent?.reason?.message ?? `agent "${node.agent}" is unavailable or not selectable`
+      return this.fail(run, { code: "agent_unavailable", message, nodeID })
     }
-    const model = agent.model ?? await this.native.getDefaultModel().catch(() => undefined)
-    if (!model) return this.fail(run, { code: "agent_unavailable", message: `agent "${node.agent}" has no model or default model`, nodeID })
 
     const stepIndex = run.execution!.nextStep
     let attempt = 1
@@ -358,14 +388,13 @@ export class WorkflowRunner {
 
     let sessionID: string
     try {
-      const session = await this.native.createSession({
-        parentID: run.runSessionID,
-        agent: node.agent,
+      const session = await this.harness.createSession({
+        agentRef: node.agent,
+        ...(run.runSessionID === null ? {} : { parent: run.runSessionID }),
         title: `Workflow ${branch.workflowID} / ${nodeID} / step ${stepIndex}`,
-        model,
         metadata: { ...metadata, plugin: "flowgraph", kind: "workflow-node" },
       })
-      sessionID = session.id
+      sessionID = session.ref
     } catch (error) {
       return this.fail(run, { code: "session_create_failed", message: errorMessage(error), nodeID, nativeErrorType: errorType(error) })
     }
@@ -376,9 +405,15 @@ export class WorkflowRunner {
       phase: "session_created", startedAt: this.now(), resultAttempts: 0,
       ...(branch.calls.length > 0 && { workflowID: branch.workflowID, callPath: branch.calls.map((frame) => frame.nodeID) }),
     }
+    const graph = buildGraph(workflow)
+    const outcomes = validOutcomes(graph, nodeID)
     const prompt = buildNodePrompt({
-      workflow, graph: buildGraph(workflow), runID: run.runID, nodeID, stepIndex: run.stepCount + 1, maxSteps: run.maxSteps,
-      objective: run.objective, runSessionID: run.runSessionID, nodeSessionID: sessionID, joined: branch.joined === true,
+      workflow, graph, runID: run.runID, nodeID, stepIndex: run.stepCount + 1, maxSteps: run.maxSteps,
+      objective: run.objective,
+      ...(run.runSessionID === null ? {} : { runSessionID: run.runSessionID }),
+      harnessName: this.harness.capabilities.displayName,
+      completionInstruction: this.completionInstruction(nodeID, outcomes),
+      nodeSessionID: sessionID, joined: branch.joined === true,
       previousSessions: previous.map((step) => step.sessionID),
       previous: previous.map((step) => ({
         nodeID: step.nodeID, summary: step.result?.summary ?? step.error?.message ?? "no result",
@@ -407,8 +442,8 @@ export class WorkflowRunner {
   private async prompt(run: RunRecord, branch: Branch, active: ActiveStep, text: string): Promise<RunRecord> {
     const at = this.now()
     try {
-      await this.native.prompt({
-        sessionID: active.sessionID, messageID: active.promptMessageID, text,
+      await this.harness.submit({
+        session: active.sessionID, submission: active.promptMessageID, text,
         metadata: { runID: run.runID, stepID: active.stepID, nodeID: active.nodeID, workflowID: branch.workflowID,
           ...(active.resultAttempts > 0 && { correction: "true" }) },
       })
@@ -442,10 +477,13 @@ export class WorkflowRunner {
     }
 
     if (active.phase === "prepared" || active.phase === "session_created" || active.phase === "prompting") {
-      const messages = await this.native.getContext(sessionID).catch(() => undefined)
-      const admitted = messages?.find((message) => message.type === "user" && message.id === active.promptMessageID)
-      if (admitted) return { type: "admitted", at: admitted.time?.created || active.startedAt }
-      if (messages?.length === 0 && active.resultAttempts === 0 && active.phase !== "prompting") return { type: "unadmitted" }
+      if (this.harness.submissionState) {
+        const state = await this.harness.submissionState(sessionID, active.promptMessageID).catch(() => "unknown" as const)
+        if (state === "admitted") return { type: "admitted", at: active.startedAt }
+        if (state === "not_admitted" && active.resultAttempts === 0 && active.phase !== "prompting") {
+          return { type: "unadmitted" }
+        }
+      }
       return blocked("ambiguous_node", `could not reconcile prompt admission for node "${nodeID}"`)
     }
 
@@ -455,54 +493,77 @@ export class WorkflowRunner {
       return { type: "failed", failure: { code: "node_timeout", message: `node "${nodeID}" exceeded its ${nodeLimit}s timeout`, nodeID, stepID } }
     }
 
-    const permissions = (await this.native.listPermissions(sessionID).catch(() => branch.permissions ?? [])).slice(0, 50)
-    const previous = branch.permissions ?? []
-    if (permissions.length !== previous.length || permissions.some((item, index) => item.requestID !== previous[index]?.requestID)) {
-      return { type: "permissions", permissions }
+    const permissions = await this.harness.pendingPermissions(sessionID).catch(() => ({ state: "unknown" as const }))
+    if (permissions.state === "unknown") {
+      return blocked("ambiguous_node", `could not determine pending permissions for node "${nodeID}"`)
     }
-    if (permissions.length > 0) return
+    if (permissions.state === "pending") {
+      const items = permissions.items.slice(0, 50)
+      const previous = branch.permissions ?? []
+      if (items.length !== previous.length || items.some((item, index) => item.requestID !== previous[index]?.requestID)) {
+        return { type: "permissions", permissions: items }
+      }
+      return
+    }
 
-    let session: SessionSnapshot
+    let snapshot: ExecutionSnapshot
     try {
-      session = await this.native.getSession(sessionID)
+      snapshot = await this.harness.inspect(sessionID)
     } catch (error) {
       return { type: "failed", failure: { code: "session_unavailable", message: errorMessage(error), nodeID, stepID, nativeErrorType: errorType(error) } }
     }
-    if (session.time.idle !== undefined && session.time.idle >= (active.promptedAt ?? active.startedAt)) {
-      switch (session.outcome) {
-        case "succeeded": {
-          const report = await this.store.getReport(run.project.id, run.runID, stepID)
-          if (report?.sessionID === sessionID) {
-            const audit = auditFromMessages(await this.native.getContext(sessionID).catch(() => []))
-            audit.toolCalls = audit.toolCalls.slice(-200)
-            return { type: "completed", step: {
-              ...stepRecord(run, active), status: "completed", result: report.result, nativeOutcome: session.outcome,
-              usage: usageFromSession(session), audit, completedAt: this.now(),
-            } }
-          }
-          if (recovering) return blocked("missing_report", `node "${nodeID}" finished after restart without a structured report`)
-          if (active.resultAttempts < limits.max_result_retries) return { type: "correction" }
+
+    if (snapshot.finishedAt !== undefined && snapshot.finishedAt < (active.promptedAt ?? active.startedAt)) {
+      // A terminal snapshot from before this prompt is stale.
+      return
+    }
+    if (snapshot.state === "running" || snapshot.state === "starting") {
+      if (recovering && Date.now() - recoveredAt >= this.options.recoveryGraceMs) {
+        return blocked("ambiguous_node", `node "${nodeID}" did not report a terminal outcome after restart`)
+      }
+      return
+    }
+    if (snapshot.state === "unknown") {
+      if (recovering && Date.now() - recoveredAt < this.options.recoveryGraceMs) return
+      return blocked("ambiguous_node", `node "${nodeID}" is idle without a terminal outcome`)
+    }
+
+    switch (snapshot.state) {
+      case "succeeded": {
+        const report = await this.store.getReport(run.project.id, run.runID, stepID)
+        if (report?.sessionID === sessionID) {
+          const audit = snapshot.audit ?? { toolCalls: [], mutatingToolCalls: 0 }
+          audit.toolCalls = audit.toolCalls.slice(-200)
+          return { type: "completed", step: {
+            ...stepRecord(run, active), status: "completed", result: report.result, nativeOutcome: "succeeded",
+            usage: snapshot.usage ?? zeroUsage(), audit, completedAt: snapshot.finishedAt ?? this.now(),
+          } }
+        }
+        if (recovering) return blocked("missing_report", `node "${nodeID}" finished after restart without a structured report`)
+        if (!this.harness.capabilities.results.corrections) {
           return { type: "failed", failure: {
             code: "missing_structured_result",
-            message: `node "${nodeID}" finished without calling flowgraph_report after ${active.resultAttempts} correction attempt(s)`,
+            message: `node "${nodeID}" finished without a structured result and the harness does not support corrections`,
             nodeID, stepID,
           } }
         }
-        case "failed": {
-          const idle = latestIdle(await this.native.getContext(sessionID).catch(() => []))
-          return { type: "failed", failure: {
-            code: "native_failure", message: errorMessage(idle?.error?.message, "native agent execution failed"),
-            nodeID, stepID, nativeErrorType: idle?.error?.type,
-          } }
-        }
-        case "interrupted":
-          return blocked("node_interrupted", `node "${nodeID}" was interrupted; resume with confirmRetry=true to retry it`)
-        default:
-          return blocked("ambiguous_node", `node "${nodeID}" is idle without a terminal outcome`)
+        if (active.resultAttempts < limits.max_result_retries) return { type: "correction" }
+        return { type: "failed", failure: {
+          code: "missing_structured_result",
+          message: `node "${nodeID}" finished without a structured result after ${active.resultAttempts} correction attempt(s)`,
+          nodeID, stepID,
+        } }
       }
-    }
-    if (recovering && Date.now() - recoveredAt >= this.options.recoveryGraceMs) {
-      return blocked("ambiguous_node", `node "${nodeID}" did not report a terminal outcome after restart`)
+      case "failed":
+        return { type: "failed", failure: {
+          code: "native_failure", message: errorMessage(snapshot.error?.message, "native agent execution failed"),
+          nodeID, stepID, nativeErrorType: snapshot.error?.type,
+        } }
+      case "interrupted":
+      case "cancelled":
+        return blocked("node_interrupted", `node "${nodeID}" was interrupted; resume with confirmRetry=true to retry it`)
+      default:
+        return blocked("ambiguous_node", `node "${nodeID}" is idle without a terminal outcome`)
     }
   }
 
@@ -541,7 +602,17 @@ export class WorkflowRunner {
           ...active, phase: "prompting", promptMessageID: newMessageID(this.now()), resultAttempts: active.resultAttempts + 1,
         }
         const next = await updateBranch((draft) => { draft.active = correcting })
-        await this.prompt(next, branch, correcting, buildReportCorrectionPrompt(buildGraph(definitionOf(run, branch.workflowID)), active.nodeID))
+        const graph = buildGraph(definitionOf(run, branch.workflowID))
+        await this.prompt(
+          next,
+          branch,
+          correcting,
+          buildReportCorrectionPrompt(
+            graph,
+            active.nodeID,
+            this.completionInstruction(active.nodeID, validOutcomes(graph, active.nodeID)),
+          ),
+        )
         return
       }
       case "completed":
@@ -623,7 +694,7 @@ export class WorkflowRunner {
     const active = activeSteps(run)
     if (active.length === 0 && !run.execution?.branches.length) return run
     const interrupted = await Promise.all(active.map(async (step) => {
-      const accepted = await this.native.interrupt(step.sessionID).catch(() => false)
+      const accepted = await this.harness.cancel(step.sessionID).catch(() => false)
       this.invocations.unregister(step.sessionID)
       return accepted
     }))
@@ -654,7 +725,10 @@ export class WorkflowRunner {
 
   private async permissionsFor(run: RunRecord, step: ActiveStep): Promise<PermissionSummary[]> {
     const persisted = run.execution?.branches.find((branch) => branch.active?.stepID === step.stepID)?.permissions
-    return this.native.listPermissions(step.sessionID).catch(() => run.execution ? persisted ?? [] : run.pendingPermissions)
+    const state = await this.harness.pendingPermissions(step.sessionID).catch(() => ({ state: "unknown" as const }))
+    if (state.state === "pending") return state.items
+    if (state.state === "none") return []
+    return run.execution ? persisted ?? [] : run.pendingPermissions
   }
 
   async livePermissions(run: RunRecord): Promise<PermissionSummary[]> {
@@ -670,6 +744,7 @@ export class WorkflowRunner {
     const key = ownershipKey(await this.requireRun(projectID, runID))
     return gate.run(key, async () => {
       const current = await this.requireRun(projectID, runID)
+      await this.assertHarness(current)
       if (Object.hasOwn(current.recentControlRequests, requestID)) return current
       if (current.revision !== expectedRevision) throw new RevisionConflictError(current.revision)
       const owner = owners.get(key) ?? await this.claim(key, current)
@@ -696,7 +771,15 @@ export class WorkflowRunner {
       if (TERMINAL.has(run.status) || run.pause?.reason === "route") {
         throw new NotResumableError(`a ${run.status} run cannot be resumed`)
       }
-      const permissions = await runner.livePermissions(run)
+      const permissionStates = await Promise.all(activeSteps(run).map((step) =>
+        runner.harness.pendingPermissions(step.sessionID).catch(() => ({ state: "unknown" as const }))))
+      if (permissionStates.some((state) => state.state === "unknown")) {
+        throw new NotResumableError("cannot confirm whether a permission request is pending; refusing to retry")
+      }
+      const permissions = Array.from(new Map(
+        permissionStates.flatMap((state) => state.state === "pending" ? state.items : [])
+          .map((item) => [item.requestID, item] as const),
+      ).values())
       if (permissions.length > 0) throw new PermissionPendingError(permissions)
 
       const execution = initialize(run)
@@ -708,13 +791,18 @@ export class WorkflowRunner {
       const ambiguous = execution.branches.filter((branch) => branch.active &&
         (branch.active.phase === "ambiguous" || (branch.blocker && branch.blocker.type !== "permission")))
       if (ambiguous.length > 0 && !confirmRetry) throw new AmbiguousResumeError()
+      const stopped = (snapshot: ExecutionSnapshot | undefined): boolean =>
+        snapshot !== undefined &&
+        snapshot.state !== "running" &&
+        snapshot.state !== "starting" &&
+        snapshot.state !== "unknown"
       const records = await Promise.all(ambiguous.map(async (branch) => {
         const active = branch.active!
-        let session = await runner.native.getSession(active.sessionID).catch(() => undefined)
-        if (session?.time.idle === undefined || session.time.idle < (active.promptedAt ?? active.startedAt)) {
-          await runner.native.interrupt(active.sessionID).catch(() => false)
-          session = await runner.native.getSession(active.sessionID).catch(() => undefined)
-          if (session?.time.idle === undefined || session.time.idle < (active.promptedAt ?? active.startedAt)) {
+        let snapshot = await runner.harness.inspect(active.sessionID).catch(() => undefined)
+        if (!stopped(snapshot)) {
+          await runner.harness.cancel(active.sessionID).catch(() => false)
+          snapshot = await runner.harness.inspect(active.sessionID).catch(() => undefined)
+          if (!stopped(snapshot)) {
             throw new NotResumableError(`could not confirm node "${active.nodeID}" stopped`)
           }
         }
@@ -857,10 +945,14 @@ export class WorkflowRunner {
 
   async recoverProject(projectID: string, canonical?: string): Promise<void> {
     const runs = await this.store.listRuns(projectID)
-    const outcomes = await Promise.allSettled(runs.filter((run) =>
+    const candidates = runs.filter((run) =>
       (canonical === undefined || run.project.canonical === canonical) && run.status !== "paused" &&
       (!TERMINAL.has(run.status) || activeSteps(run).length > 0),
-    ).map(async (run) => {
+    )
+    const owned = (await Promise.all(
+      candidates.map(async (run) => [run, await this.ownsHarness(run)] as const),
+    )).filter(([, mine]) => mine).map(([run]) => run)
+    const outcomes = await Promise.allSettled(owned.map(async (run) => {
       try {
         await this.start(projectID, run.runID, { recovery: true })
       } catch (error) {
@@ -903,7 +995,7 @@ export class WorkflowRunner {
         if (owners.get(key) !== owner) return
         owner.controller.abort()
         const run = await this.store.getRun(owner.projectID, owner.runID)
-        if (run) await Promise.allSettled(activeSteps(run).map((step) => this.native.interrupt(step.sessionID)))
+        if (run) await Promise.allSettled(activeSteps(run).map((step) => this.harness.cancel(step.sessionID)))
       })
       await owner.promise
     }))

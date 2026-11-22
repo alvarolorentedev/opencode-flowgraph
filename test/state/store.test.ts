@@ -108,4 +108,15 @@ describe("WorkflowStore", () => {
     await storage.set("v1/runs/prj_1/bad", { nope: true })
     await expect(store.listRuns("prj_1")).rejects.toMatchObject({ name: "StateCorruptionError" })
   })
+
+  it("stores harness identity separately from the run record", async () => {
+    const store = new WorkflowStore(new MemoryStorage())
+    const run = await store.createRun(runRecord())
+    expect(await store.getRunHarness("prj_1", run.runID)).toBeUndefined()
+    await store.putRunHarness("prj_1", run.runID, { id: "opencode", version: "2.2.5" })
+    expect(await store.getRunHarness("prj_1", run.runID)).toEqual({ id: "opencode", version: "2.2.5" })
+    await store.removeRunHarness("prj_1", run.runID)
+    expect(await store.getRunHarness("prj_1", run.runID)).toBeUndefined()
+    expect(await store.getRun("prj_1", run.runID)).toBeDefined()
+  })
 })
