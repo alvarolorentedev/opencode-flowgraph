@@ -8,8 +8,9 @@ import { RunLockManager } from "../../src/state/concurrency.js"
 import { WorkflowStore } from "../../src/state/store.js"
 import { createInvocationRegistry, ReportIntake } from "../../src/execution/report-intake.js"
 import { FakeHarness, type Behavior, type PromptLog } from "../fixtures/fake-harness.js"
-import { MemoryStorage, source, waitForRun } from "../fixtures/memory.js"
+import { MemoryStorage, makeRunRecord, source, waitForRun } from "../fixtures/memory.js"
 import { WorkflowRepository } from "../../src/workflow/loader.js"
+import { NotResumableError } from "../../src/execution/runner.js"
 
 const dirs: string[] = []
 const runners: WorkflowRunner[] = []
@@ -137,6 +138,49 @@ nodes:
     })
     const final = await waitForRun(store, project.id, started.runID, (run) => run.status === "completed")
     expect(final.steps.map((step) => step.nodeID)).toEqual(["signoff", "ship"])
+  })
+
+  it("exposes foreign ownership and keeps foreign runs read-only", async () => {
+    const { service, store, project } = await setup()
+    const owned = await store.createRun(makeRunRecord({ project, runID: "run_0000000009_ownedd" }))
+    const permission = { requestID: "perm_stored", action: "shell", resources: ["git status"] }
+    const foreign = await store.createRun(makeRunRecord({
+      project,
+      runID: "run_0000000010_foreign",
+      createdAt: 3_000,
+      pendingPermissions: [permission],
+    }))
+    await store.putRunHarness(project.id, foreign.runID, { id: "other-harness", version: "1.0.0" })
+
+    const summaries = await service.listRuns()
+    expect(summaries.find((run) => run.runID === foreign.runID)?.harness)
+      .toEqual({ id: "other-harness", version: "1.0.0" })
+    expect(summaries.find((run) => run.runID === foreign.runID)?.readOnly).toBe(true)
+    expect(summaries.find((run) => run.runID === owned.runID)?.harness).toBeUndefined()
+    expect(summaries.find((run) => run.runID === owned.runID)?.readOnly).toBeUndefined()
+
+    const detail = await service.getRun(foreign.runID)
+    expect(detail.harness).toEqual({ id: "other-harness", version: "1.0.0" })
+    expect(detail.readOnly).toBe(true)
+    expect(detail.resumable).toBe(false)
+    expect(detail.pendingPermissions).toEqual([permission])
+
+    const graph = await service.getRunGraph(foreign.runID)
+    expect(graph.harness).toEqual({ id: "other-harness", version: "1.0.0" })
+    expect(graph.readOnly).toBe(true)
+    expect(graph.controls).toEqual({ canPause: false, canResume: false, canRespond: false, canCancel: false })
+    expect((await service.getRunGraph(owned.runID)).harness).toBeUndefined()
+    expect((await service.getRunGraph(owned.runID)).readOnly).toBeUndefined()
+    expect((await service.getRun(owned.runID)).harness).toBeUndefined()
+    expect((await service.getRun(owned.runID)).readOnly).toBeUndefined()
+
+    await expect(service.pauseRun(foreign.runID, "pause", foreign.revision)).rejects.toBeInstanceOf(NotResumableError)
+    await expect(service.resumeRun(foreign.runID, "resume", foreign.revision)).rejects.toBeInstanceOf(NotResumableError)
+    await expect(service.cancelRun(foreign.runID, "cancel", foreign.revision)).rejects.toBeInstanceOf(NotResumableError)
+    await expect(service.respondRun(foreign.runID, "respond", foreign.revision, { outcome: "done" }))
+      .rejects.toBeInstanceOf(NotResumableError)
+
+    expect(service.harnessCapabilities().id).toBe("fake")
   })
 })
 

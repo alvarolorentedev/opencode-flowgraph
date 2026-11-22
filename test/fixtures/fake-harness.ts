@@ -17,6 +17,8 @@ export type Behavior = {
   outcome?: "succeeded" | "failed" | "interrupted"
   pendingPermission?: boolean
   delayMs?: number
+  /** Finish the session without a terminal outcome. */
+  unknownTerminal?: boolean
 }
 
 export type PromptLog = {
@@ -28,6 +30,9 @@ export type PromptLog = {
 }
 
 export type FakeHarnessOptions = {
+  id?: string
+  displayName?: string
+  version?: string
   runScope?: boolean
   adoptLegacyRuns?: boolean
   admission?: "confirmed" | "ambiguous"
@@ -36,6 +41,7 @@ export type FakeHarnessOptions = {
   resultsMechanism?: HarnessCapabilities["results"]["mechanism"]
   corrections?: boolean
   usage?: UsageEstimate
+  security?: Partial<HarnessCapabilities["security"]>
 }
 
 type SessionState = {
@@ -80,8 +86,9 @@ export class FakeHarness implements HarnessAdapter {
     private readonly options: FakeHarnessOptions = {},
   ) {
     this.capabilities = {
-      id: "fake",
-      displayName: "Fake Harness",
+      id: options.id ?? "fake",
+      displayName: options.displayName ?? "Fake Harness",
+      ...(options.version === undefined ? {} : { version: options.version }),
       agents: { discovery: "configured" },
       sessions: {
         runScope: options.runScope ?? true,
@@ -99,6 +106,7 @@ export class FakeHarness implements HarnessAdapter {
         nativePermissions: true,
         protectedPaths: "none",
         backgroundWork: "unobservable",
+        ...options.security,
       },
       usage: { tokens: true, cost: true },
       audit: true,
@@ -202,7 +210,7 @@ export class FakeHarness implements HarnessAdapter {
       }
     }
 
-    session.outcome = outcome
+    session.outcome = behavior.unknownTerminal ? undefined : outcome
     session.idle = this.tick()
     session.updated = this.now
     session.messages.push({

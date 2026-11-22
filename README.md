@@ -31,7 +31,7 @@ You bring two things:
 
 The plugin validates the graph, then runs one node at a time. Agent nodes use a fresh OpenCode session; human nodes wait for a decision. Each node reports an outcome. The validated graph — not the agent — decides where the run goes next. State is checkpointed after every step, so runs can pause and recover without losing completed work.
 
-Flowgraph is split into a portable workflow core and a harness adapter. The core owns graphs, scheduling, checkpoints, recovery, and structured outcomes. The adapter owns native agents, sessions, models, permissions, and tools. OpenCode is the reference adapter and the only adapter implemented today. See [`docs/architecture.md`](docs/architecture.md) and [`docs/adapters.md`](docs/adapters.md); other harnesses are not supported yet.
+Flowgraph is split into a portable workflow core and a harness adapter. The core owns graphs, scheduling, checkpoints, recovery, and structured outcomes. The adapter owns native agents, sessions, models, permissions, and tools. OpenCode is the reference adapter and the only adapter implemented today. The core exposes the active adapter's capabilities and keeps runs written by another harness visible but read-only. A run's first valid structured report is canonical, so duplicate or conflicting reports cannot overwrite it. See [`docs/architecture.md`](docs/architecture.md) and [`docs/adapters.md`](docs/adapters.md); other harnesses are not supported yet.
 
 ## Onboarding
 
@@ -121,7 +121,11 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 
 - **TUI** — `/flowgraph` opens the live graph. Use `enter` for the primary active session, `s` to pick a session, and `p` to pause, resume, or answer a human step.
 - **Desktop** — the **Workflow** command opens a run picker; click nodes to inspect their sessions, or use **Respond** for a human step.
-- **RPC** — `getRun`, `getRunGraph`, `pauseRun`, `resumeRun`, `respondRun`, `cancelRun`, and the `runUpdated` event.
+- **RPC** — `harnessCapabilities`, `getRun`, `getRunGraph`, `pauseRun`, `resumeRun`, `respondRun`, `cancelRun`, and the `runUpdated` event.
+
+The TUI and Desktop show the active harness, its capability summary, and any
+honest security warning. A run owned by another harness is labeled and
+read-only in this client.
 
 ## Before you start
 
@@ -134,6 +138,8 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 
 - Parallel branches and concurrent runs share the checkout. Overlapping file writes can conflict.
 - Execution supports one OpenCode server per project database.
+- Report persistence is canonical per step on one server; distributed exactly-once is not promised.
+- Runs written by another harness are visible and read-only until a second adapter ships.
 - No hosted execution, marketplace, visual editor, or browser UI.
 - Exactly-once external side effects are not promised. Cost is reported, not capped.
 - The Desktop GUI is experimental; the TUI and RPC are the stable surfaces.
@@ -151,7 +157,7 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 | [Interfaces](docs/interfaces.md) | RPC, `/flowgraph` command, TUI, Desktop GUI, Mermaid |
 | [Architecture](docs/architecture.md) | Core/adapter boundary, runtime contract, storage, recovery, security |
 | [Adapters](docs/adapters.md) | Implementing a harness adapter, result transports, compatibility notes |
-| [Roadmap](docs/roadmap.md) | Planned harness verification, contract parity, and second-harness gates |
+| [Roadmap](docs/roadmap.md) | Harness parity status, contract, capabilities, and second-harness gates |
 | [Development](docs/development.md) | Module map, local development, migration, releasing |
 
 ## License

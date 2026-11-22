@@ -11,21 +11,22 @@
 
 | Module | Responsibility |
 |---|---|
-| `workflow/schema.ts` | Zod YAML schema and hard limits |
+| `workflow/schema.ts` | Zod YAML schema, hard limits, and `NodeResultJsonSchema` generated from `NodeResultSchema` |
 | `workflow/loader.ts` | Safe YAML parsing, discovery, hashing, atomic file operations |
 | `workflow/graph.ts` | Pure graph construction, validation, transition resolution |
 | `workflow/mermaid.ts` | Pure, escaped, deterministic Mermaid generation |
 | `workflow/validator.ts` | Semantic validation and adapter agent resolution |
-| `execution/harness.ts` | Portable `HarnessAdapter` contract and capabilities |
-| `execution/report-intake.ts` | Structured-result validation, attribution, dedupe, and persistence |
+| `execution/harness.ts` | Portable `HarnessAdapter` contract and strict `HarnessCapabilitiesSchema` |
+| `execution/report-intake.ts` | Structured-result validation, attribution, canonical persistence, dedupe, and `syntheticReportRef` |
 | `adapters/opencode/runtime.ts` | OpenCode `HarnessAdapter` over native agents, sessions, and permissions |
 | `adapters/opencode/report-tool.ts` | OpenCode `flowgraph_report` tool |
 | `adapters/opencode/tool-hooks.ts` | Workflow-session background-work policy and protected configuration guard |
 | `adapters/opencode/results.ts` | OpenCode usage/audit normalization |
 | `execution/prompts.ts` | Bounded context handoff prompts with adapter-supplied completion text |
 | `execution/results.ts` | Portable usage merge and outcome assertion |
-| `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, controls |
+| `execution/run-graph.ts` | Structured run graph, active-node state, session mapping, ownership-aware controls |
 | `ui/runs.ts` | Cross-project/worktree run discovery, merge, and ordering |
+| `ui/harness.ts` | Pure active-harness lines, warnings, and foreign-run copy |
 | `ui/graph.ts` | Pure boxed terminal diagram: ranking, rails, tones, width/height fallback |
 | `tui.tsx` | TUI workflow page, session panel, command, keyboard controls |
 | `gui.tsx` | Experimental Desktop GUI run picker, panel, and Mermaid renderer |
@@ -41,7 +42,9 @@
 
 ### Structured result boundary
 
-Agent prompts do not have a universal native response schema. The core owns `ReportIntake`, which validates outcomes, attributes reports to the active run/step/session, deduplicates by native tool-call ID, and persists one report per step. Each adapter transports the report using its native mechanism: a typed tool, native structured output, or a client-provided MCP tool.
+Agent prompts do not have a universal native response schema. The core owns `ReportIntake`, which validates outcomes, attributes reports to the active run/step/session, and persists one canonical report per step. The first valid report wins; an identical resubmission is idempotent, and a conflict or a second reference is rejected without replacing it. The store serializes that check per step on one server. Each adapter transports the report using its native mechanism: a typed tool, native structured output, or a client-provided MCP tool.
+
+For native structured output, use `NodeResultJsonSchema`; it is generated from `NodeResultSchema` and pinned by `test/execution/result-schema.test.ts`. A transport without a native tool-call ID passes `syntheticReportRef(runID, stepID, sessionID, attempt)` as the report reference.
 
 Free-form phrases such as `DONE` or `LGTM` are never parsed. The graph, not the agent, chooses the next node.
 
@@ -59,7 +62,7 @@ The optional real OpenCode plugin-loading/RPC smoke test:
 OPENCODE_SMOKE=1 OPENCODE_BIN=/path/to/opencode bun run test:smoke
 ```
 
-It starts an isolated `opencode api --standalone` request, loads the plugin from this repository, and calls `capabilities` and `listWorkflows`. It does not make model calls.
+It starts an isolated `opencode api --standalone` request, loads the plugin from this repository, and calls `capabilities` and `listWorkflows`. It also starts `opencode serve` and covers a no-model human-only lifecycle: start, human decision, a second approval through to `completed`, pause, resume, and a separate run that is cancelled at its blocker. It does not make model calls.
 
 The opt-in model-routing integration uses a local OpenAI-compatible mock server and makes no paid model calls:
 
@@ -67,7 +70,11 @@ The opt-in model-routing integration uses a local OpenAI-compatible mock server 
 OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=/path/to/opencode bun run test:integration
 ```
 
-It checks the model IDs and variant sent in actual inference requests. The default unit suite still uses `FakeHarness` and does not require an OpenCode binary.
+It checks the model IDs and variant sent in actual inference requests, and restarts `opencode serve` mid-agent-step twice: with a persisted `flowgraph_report`, recovery reconciles the report and completes the run; without a report, recovery blocks or fails conservatively. Neither path re-sends the prompt. The mock provider cannot deterministically produce an unknown prompt admission or an unknown permission state, so those recovery cases are covered only by the `FakeHarness` contract suite. The default unit suite still uses `FakeHarness` and does not require an OpenCode binary.
+
+**Verification record (2026-11-22):** `bun run check` → 201 passed, 5 skipped (2 test files: the OpenCode smoke and model-integration suites); `bun run build:gui` → pass. With `@opencode/cli` 2.2.5 on `PATH`, `OPENCODE_SMOKE=1 OPENCODE_BIN=... bun run test:smoke` → 2 passed and `OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=... bun run test:integration` → 3 passed, including both restart cases and the reported `harnessCapabilities` values. The manual real-model E2E run and the manual TUI/Desktop check remain outstanding. Durable-report reconciliation after restart is also covered at the core level by `test/execution/runner.test.ts` ("recovers a node that completed before the run checkpoint").
+
+The adapter contract suite is reusable. `test/contract/harness-suite.ts` exports `describeHarnessContract`; a new adapter supplies a fixture factory and runs it without touching the core tests. `test/contract/harness-contract.test.ts` runs it on two `FakeHarness` capability variants, including a parentless-session variant, and includes capability-honesty and unknown-terminal recovery checks.
 
 A real-model end-to-end verification is manual: define two primary agents, create the workflow, start a run through RPC, verify the review loop, disconnect the client, restart the server, and confirm conservative recovery. See [`operations.md`](operations.md) and [`interfaces.md`](interfaces.md).
 

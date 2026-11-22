@@ -320,6 +320,14 @@ export const ReportRecordSchema = z
   .strict()
 export type ReportRecord = z.infer<typeof ReportRecordSchema>
 
+export const RunHarnessSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    version: z.string().min(1).max(64).optional(),
+  })
+  .strict()
+export type RunHarness = z.infer<typeof RunHarnessSchema>
+
 export const RunSummarySchema = z
   .object({
     runID: z.string().min(1).max(64),
@@ -339,6 +347,10 @@ export const RunSummarySchema = z
     blocker: BlockerSchema.nullable(),
     failure: FailureInfoSchema.nullable(),
     usage: UsageEstimateSchema,
+    /** Present only when the run belongs to a different harness. */
+    harness: RunHarnessSchema.optional(),
+    /** Present only when the active adapter does not own the run. */
+    readOnly: z.literal(true).optional(),
   })
   .strict()
 export type RunSummary = z.infer<typeof RunSummarySchema>
@@ -352,6 +364,10 @@ export const RunDetailSchema = z
     pendingPermissions: z.array(PermissionSummarySchema),
     mermaid: z.string(),
     resumable: z.boolean(),
+    /** Present only when the run belongs to a different harness. */
+    harness: RunHarnessSchema.optional(),
+    /** Present only when the active adapter does not own the run. */
+    readOnly: z.literal(true).optional(),
   })
   .strict()
 export type RunDetail = z.infer<typeof RunDetailSchema>

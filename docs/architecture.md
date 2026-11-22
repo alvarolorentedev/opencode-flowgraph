@@ -42,7 +42,7 @@ src/
     checkpoint.ts          Portable branch/call/join state machine
     prompts.ts             Bounded prompts; completion instruction is adapter-supplied
     results.ts             Portable usage merge and outcome assertion
-    run-graph.ts           Structured observability
+    run-graph.ts           Structured observability and ownership-aware controls
   workflow/                YAML, graph, validation, Mermaid
   state/                   Store, keys, types, locking
   service.ts               Workflow/run facade
@@ -50,6 +50,7 @@ src/
   index.ts                 OpenCode plugin composition root
   rpc.ts                   Public OpenCode RPC re-export
   tui.tsx / gui.tsx / ui/  OpenCode UI surfaces
+    ui/harness.ts          Pure harness capability and foreign-run copy
 ```
 
 The core folders are `execution/`, `workflow/`, `state/`, `util/`, plus `service.ts`, `contract.ts`, `command.ts`, and `server-command.ts`. They must not import `@opencode/*` or `src/adapters/*`. `test/architecture/core-is-harness-agnostic.test.ts` enforces that boundary.
@@ -78,7 +79,12 @@ Key rules:
 - `cancel` returns `true` only when the stop is confirmed.
 - Adapters must be safe for concurrent calls on different sessions.
 
-`HarnessCapabilities` reports what the adapter can actually do. Capability fields are not marketing: they drive conservative engine behavior and host reporting. See [`adapters.md`](adapters.md).
+`HarnessCapabilities` is defined by one strict Zod schema
+(`HarnessCapabilitiesSchema`) in `src/execution/harness.ts`; the TypeScript type
+and the `harnessCapabilities` RPC output are derived from it. It reports what the
+adapter can actually do. Capability fields are not marketing: they drive
+conservative engine behavior and host reporting. See
+[`adapters.md`](adapters.md).
 
 ## Structured results
 
@@ -87,9 +93,15 @@ The core owns `ReportIntake`:
 - resolves the active invocation by native session;
 - rejects reports outside an active node;
 - rejects undeclared outcomes;
-- deduplicates by native tool-call ID;
+- keeps the first valid report for a run/step canonical;
+- treats an identical same-reference resubmission as idempotent;
+- rejects a conflicting result or a second reference for that step;
 - caps reports per step;
 - writes one `ReportRecord` attributed to the run, step, and session.
+
+The store serializes the canonical read/write per step. That protects concurrent
+submissions on one server; the storage backend has no distributed
+compare-and-swap, so exactly-once is not claimed across servers.
 
 Adapters transport reports using their native mechanism:
 
@@ -101,6 +113,10 @@ Adapters transport reports using their native mechanism:
 | ACP | Client-provided stdio MCP server exposing `flowgraph_report` |
 
 Free-form completion markers such as `DONE` or `LGTM` are never parsed.
+`NodeResultJsonSchema` (generated from `NodeResultSchema`) is exported for
+adapters that use native structured output. Transports without a native
+tool-call ID use `syntheticReportRef`, which is deterministic per
+run/step/session/attempt and deduplicates like a native ID.
 
 ## Storage and recovery
 
@@ -121,6 +137,15 @@ Portable recovery remains conservative:
 - An unknown admission, permission, or terminal state blocks.
 - `resume` refuses when permission state cannot be confirmed.
 - A foreign harness’s run is read-only and cannot be resumed or controlled.
+- A legacy run with no harness sidecar is read-only unless the active adapter sets `sessions.adoptLegacyRuns`.
+
+A run owned by another harness is still visible through `listRuns`, `getRun`, and
+`getRunGraph`, but those views add `harness: { id, version? }` and
+`readOnly: true` only for a run the adapter does not own. Owned and adopted
+legacy runs keep their existing payloads. An unadopted legacy run adds
+`readOnly: true` without a harness identity. Foreign reads use the stored
+permissions; the engine never queries that harness’s live native session, and all
+four graph controls plus `resumable` are false.
 
 Harness-specific session reconciliation belongs in the adapter. For example, an adapter whose native SDK does not reveal a session ID until the first message may keep an adapter-local durable mapping. If that mapping is missing after a crash, the adapter returns `unknown` and the engine blocks.
 

@@ -12,6 +12,17 @@ import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
 import { PLUGIN_VERSION } from "./version.js"
 import { renderRunGraphDiagram, type GraphTone } from "./ui/graph.js"
+import {
+  foreignControlToast,
+  foreignPanelLine,
+  foreignSessionToast,
+  harnessLines,
+  harnessWarnings,
+  legacyReadOnlyPanelLine,
+  legacyReadOnlyToast,
+  runSuffix,
+  type HarnessCapabilityState,
+} from "./ui/harness.js"
 
 const PANEL = "flowgraph.graph"
 const PAGE = "workflow"
@@ -82,9 +93,11 @@ function WorkflowGraph(props: {
   onRefresh?: () => void
   width: () => number
   maxLines: () => number
+  harness?: boolean
 }) {
   const context = usePlugin()
   const [pulse, setPulse] = createSignal(false)
+  const [harness, setHarness] = createSignal<HarnessCapabilityState>({ status: "loading" })
   const [state, update] = context.storage.memory(`flowgraph.graph.${props.id}`, {
     initial: {
       graph: null as RunGraphOutput | null,
@@ -108,6 +121,20 @@ function WorkflowGraph(props: {
   const setLoading = (value: boolean) => {
     update((draft) => void (draft.loading = value))
     rerender()
+  }
+
+  const foreign = () => graph()?.harness
+  const readOnly = () => graph()?.readOnly === true
+  const toast = (message: string) => context.ui.toast.show({ message, variant: "warning" })
+  const blockControl = (): boolean => {
+    if (!foreign() && !readOnly()) return false
+    toast(foreign() ? foreignControlToast(foreign()!.id) : legacyReadOnlyToast)
+    return true
+  }
+  const blockSession = (): boolean => {
+    if (!foreign() && !readOnly()) return false
+    toast(foreign() ? foreignSessionToast(foreign()!.id) : legacyReadOnlyToast)
+    return true
   }
 
   let generation = 0
@@ -167,8 +194,18 @@ function WorkflowGraph(props: {
     timer = undefined
     setGraph(null)
     setError(null)
+    setHarness({ status: "loading" })
     setLoading(source !== undefined)
     if (!source) return
+
+    void source.rpc
+      .harnessCapabilities(undefined, { location: { directory: source.directory } })
+      .then((capabilities) => {
+        if (current === generation) setHarness({ status: "ready", capabilities })
+      })
+      .catch(() => {
+        if (current === generation) setHarness({ status: "error" })
+      })
 
     try {
       const capabilities = await withTimeout(
@@ -237,6 +274,7 @@ function WorkflowGraph(props: {
   }
 
   const openActive = () => {
+    if (blockSession()) return
     const sessionID = activeSession()
     if (!sessionID) {
       context.ui.toast.show({ message: "No active workflow session", variant: "warning" })
@@ -246,6 +284,7 @@ function WorkflowGraph(props: {
   }
 
   const pickSession = async () => {
+    if (blockSession()) return
     const current = graph()
     if (!current) return
     const options = current.nodes.flatMap((node) => node.childSteps
@@ -261,6 +300,7 @@ function WorkflowGraph(props: {
   }
 
   const pause = async () => {
+    if (blockControl()) return
     const current = graph()
     const source = props.source()
     if (!current || !source) return
@@ -275,6 +315,7 @@ function WorkflowGraph(props: {
   }
 
   const resume = async () => {
+    if (blockControl()) return
     const current = graph()
     const source = props.source()
     if (!current || !source) return
@@ -299,6 +340,7 @@ function WorkflowGraph(props: {
   }
 
   const respond = async () => {
+    if (blockControl()) return
     const current = graph()
     const source = props.source()
     if (!current || !source) return
@@ -352,6 +394,7 @@ function WorkflowGraph(props: {
   }
 
   const cancel = async () => {
+    if (blockControl()) return
     const current = graph()
     const source = props.source()
     if (!current || !source) return
@@ -414,6 +457,7 @@ function WorkflowGraph(props: {
         title: "Resume, retry, or answer a human step",
         bind: "u",
         run: () => {
+          if (blockControl()) return
           const current = graph()
           if (current?.controls.canRespond) void respond()
           else if (current?.controls.canResume) void resume()
@@ -508,12 +552,25 @@ function WorkflowGraph(props: {
     }
     return (
       <box flexDirection="column">
+        {props.harness
+          ? harnessLines(harness()).map((line) => <text fg={context.theme.text.muted}>{line}</text>)
+          : null}
+        {props.harness
+          ? harnessWarnings(harness()).map((line) => (
+              <text fg={context.theme.text.feedback.warning.base}>{line}</text>
+            ))
+          : null}
         <text fg={context.theme.text.base}>
           Workflow {value.workflowID} · {value.status} · {completed}/{value.nodes.length} nodes
         </text>
         <text fg={context.theme.text.muted}>
           Run {value.runID} · revision {value.revision}
         </text>
+        {foreign() ? (
+          <text fg={context.theme.text.feedback.warning.base}>{foreignPanelLine(foreign()!.id)}</text>
+        ) : readOnly() ? (
+          <text fg={context.theme.text.feedback.warning.base}>{legacyReadOnlyPanelLine}</text>
+        ) : null}
         {blockers.map((blocker) => (
           <text fg={context.theme.text.feedback.warning.base}>Blocked: {blocker.message}</text>
         ))}
@@ -607,6 +664,7 @@ function WorkflowPanel(props: { panel: PanelInput }) {
         <WorkflowGraph
           id="panel"
           source={source}
+          harness
           active={() => context.ui.panel.current()?.name === PANEL}
           width={() => Math.max(20, props.panel.width - 2)}
           maxLines={() => Math.max(8, context.renderer.height - 10)}
@@ -629,6 +687,7 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
       error: null as string | null,
       loading: true,
       unavailable: 0,
+      harness: { status: "loading" } as HarnessCapabilityState,
     },
   })
   const runs = () => page.runs
@@ -636,6 +695,7 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
   const error = () => page.error
   const loading = () => page.loading
   const unavailable = () => page.unavailable
+  const harness = () => page.harness
 
   const initialRunID = () => (typeof props.data?.runID === "string" ? props.data.runID : undefined)
   const initialDirectory = () =>
@@ -691,6 +751,17 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
     }
   }
 
+  const refreshHarness = async () => {
+    try {
+      const capabilities = await rpc().harnessCapabilities(undefined, {
+        location: { directory: location().directory },
+      })
+      updatePage((draft) => void (draft.harness = { status: "ready", capabilities }))
+    } catch {
+      updatePage((draft) => void (draft.harness = { status: "error" }))
+    }
+  }
+
   const move = (delta: number) => {
     const list = runs()
     if (list.length === 0) return
@@ -706,6 +777,13 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
 
   const openSelected = () => {
     const current = selected()
+    if (current?.run.harness || current?.run.readOnly) {
+      context.ui.toast.show({
+        message: current.run.harness ? foreignSessionToast(current.run.harness.id) : legacyReadOnlyToast,
+        variant: "warning",
+      })
+      return
+    }
     if (!current?.run.runSessionID) {
       context.ui.toast.show({ message: "This workflow run has no session yet", variant: "warning" })
       return
@@ -743,6 +821,7 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
 
   onMount(() => {
     void refreshRuns()
+    void refreshHarness()
     unsubscribe = rpc().events.on("runUpdated", scheduleRefresh)
     timer = setInterval(() => void refreshRuns(), 15_000)
   })
@@ -765,6 +844,12 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
         Workflow runs · {runs().length}
         {unavailable() > 0 ? ` · ${unavailable()} location(s) unavailable` : ""}
       </text>
+      {harnessLines(harness()).map((line) => (
+        <text fg={context.theme.text.muted}>{line}</text>
+      ))}
+      {harnessWarnings(harness()).map((line) => (
+        <text fg={context.theme.text.feedback.warning.base}>{line}</text>
+      ))}
       {currentError ? <text fg={context.theme.text.feedback.error.base}>{currentError}</text> : null}
       {!loading() && runs().length === 0 && !currentError ? (
         <text fg={context.theme.text.muted}>No workflow runs visible for this server.</text>
@@ -774,7 +859,7 @@ function WorkflowPage(props: { data?: Record<string, unknown>; openRun: (session
         const active = current?.run.runID === item.run.runID && current.directory === item.directory
         return (
           <text fg={active ? context.theme.text.feedback.success.base : context.theme.text.muted}>
-            {statusMarker(item.run.status)} {item.run.workflowID} · {item.run.status} · {directoryLabel(item.directory)}
+            {statusMarker(item.run.status)} {item.run.workflowID} · {item.run.status}{runSuffix(item.run)} · {directoryLabel(item.directory)}
             {` · ${objectiveLabel(item.run.objective)}`}
           </text>
         )

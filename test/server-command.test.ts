@@ -9,7 +9,7 @@ import { RunLockManager } from "../src/state/concurrency.js"
 import { WorkflowStore } from "../src/state/store.js"
 import { createInvocationRegistry, ReportIntake } from "../src/execution/report-intake.js"
 import { FakeHarness } from "./fixtures/fake-harness.js"
-import { MemoryStorage, source } from "./fixtures/memory.js"
+import { MemoryStorage, makeRunRecord, source } from "./fixtures/memory.js"
 import { WorkflowRepository } from "../src/workflow/loader.js"
 
 const dirs: string[] = []
@@ -53,7 +53,7 @@ async function setup() {
     emit: async () => undefined,
     now: () => 2_000,
   })
-  return { service }
+  return { service, store, project }
 }
 
 describe("runServerCommand", () => {
@@ -102,5 +102,40 @@ describe("runServerCommand", () => {
     const { service } = await setup()
     await service.saveWorkflow("sample", source, null)
     expect(await runServerCommand(service, "/flowgraph list")).toContain("sample")
+  })
+
+  it("marks foreign runs read-only and leaves OpenCode output unchanged", async () => {
+    const { service, store, project } = await setup()
+    const blocker = { type: "human_input" as const, message: "waiting for review", since: 1, nodeID: "reviewer", outcomes: ["approved"] }
+    const owned = await store.createRun(makeRunRecord({
+      project,
+      runID: "run_0000000011_ownedd",
+      status: "blocked",
+      currentNode: "reviewer",
+      nextNode: "reviewer",
+      blocker,
+    }))
+    const foreign = await store.createRun(makeRunRecord({
+      project,
+      runID: "run_0000000012_foreign",
+      createdAt: 3_000,
+      status: "blocked",
+      currentNode: "reviewer",
+      nextNode: "reviewer",
+      blocker,
+    }))
+    await store.putRunHarness(project.id, foreign.runID, { id: "other-harness" })
+
+    const runs = await runServerCommand(service, "runs")
+    expect(runs.split("\n").find((line) => line.includes(foreign.runID))).toContain("· [other-harness]")
+    expect(runs.split("\n").find((line) => line.includes(owned.runID))).not.toContain("[other-harness]")
+
+    const foreignGraph = await runServerCommand(service, `graph ${foreign.runID}`)
+    expect(foreignGraph).toContain("Harness: other-harness (read-only via RPC)")
+    expect(foreignGraph).not.toContain("respondRun")
+
+    const ownedGraph = await runServerCommand(service, `graph ${owned.runID}`)
+    expect(ownedGraph).toContain("Answer this human step with RPC respondRun.")
+    expect(ownedGraph).not.toContain("read-only via RPC")
   })
 })

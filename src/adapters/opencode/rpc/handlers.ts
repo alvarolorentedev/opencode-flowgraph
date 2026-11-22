@@ -7,6 +7,8 @@ export function createRpcHandlers(service: WorkflowService, capabilities: Capabi
   return {
     capabilities: async () => capabilities,
 
+    harnessCapabilities: async () => service.harnessCapabilities(),
+
     listWorkflows: async (_input: unknown, context: ErrorContext) => {
       try {
         return await service.listWorkflows()

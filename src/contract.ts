@@ -10,6 +10,7 @@ import {
   MAX_RUN_PERMISSIONS,
   PermissionSummarySchema,
   RunDetailSchema,
+  RunHarnessSchema,
   RunStatusSchema,
   RunSummarySchema,
   StepRecordSchema,
@@ -161,6 +162,10 @@ export const RunGraphOutputSchema = z
       .strict()
       .nullable(),
     failure: FailureInfoSchema.nullable(),
+    /** Present only when the run belongs to a different harness. */
+    harness: RunHarnessSchema.optional(),
+    /** Present only when the active adapter does not own the run. */
+    readOnly: z.literal(true).optional(),
   })
   .strict()
 export const StartRunInputSchema = z

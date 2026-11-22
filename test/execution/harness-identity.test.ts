@@ -96,4 +96,48 @@ describe("harness identity", () => {
     const final = await waitForRun(store, "prj_1", owned.runID, (run) => run.status !== "running")
     expect(final.status).toBe("completed")
   })
+
+  it("marks an unadopted legacy run read-only in every view", async () => {
+    const directory = await tempProject()
+    const project = { id: "prj_1", canonical: directory, directory }
+    const store = new WorkflowStore(new MemoryStorage())
+    const invocations = createInvocationRegistry()
+    const intake = new ReportIntake(store, invocations)
+    const harness = new FakeHarness(intake, scenario, { adoptLegacyRuns: false })
+    const runner = new WorkflowRunner({
+      store,
+      harness,
+      locks: new RunLockManager(),
+      invocations,
+      emit: async () => undefined,
+      now: () => 2_000,
+      options: { pollIntervalMs: 5, recoveryGraceMs: 50 },
+    })
+    runners.push(runner)
+    const service = new WorkflowService({
+      project,
+      store,
+      runner,
+      harness,
+      repo: new WorkflowRepository(directory),
+      instanceID: "inst_test",
+      emit: async () => undefined,
+      now: () => 2_000,
+    })
+    const legacy = await store.createRun(makeRunRecord({ project, status: "blocked" }))
+
+    const summary = (await service.listRuns()).find((run) => run.runID === legacy.runID)
+    expect(summary?.readOnly).toBe(true)
+    expect(summary?.harness).toBeUndefined()
+    const detail = await service.getRun(legacy.runID)
+    expect(detail.readOnly).toBe(true)
+    expect(detail.resumable).toBe(false)
+    const graph = await service.getRunGraph(legacy.runID)
+    expect(graph.readOnly).toBe(true)
+    expect(graph.controls).toEqual({ canPause: false, canResume: false, canRespond: false, canCancel: false })
+
+    await expect(service.resumeRun(legacy.runID, "resume", legacy.revision)).rejects.toBeInstanceOf(NotResumableError)
+    await expect(service.pauseRun(legacy.runID, "pause", legacy.revision)).rejects.toBeInstanceOf(NotResumableError)
+    await expect(service.cancelRun(legacy.runID, "cancel", legacy.revision)).rejects.toBeInstanceOf(NotResumableError)
+  })
 })

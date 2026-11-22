@@ -78,8 +78,14 @@ export class OpenCodeAdapter implements HarnessAdapter {
       agents: { discovery: "native" },
       sessions: { runScope: true, adoptLegacyRuns: true },
       results: { mechanism: "native_tool", corrections: true },
-      permissions: { survivesRestart: true, approval: "native" },
-      security: { nativePermissions: true, protectedPaths: "tool_hook", backgroundWork: "blocked" },
+      // shortcut: pending requests surviving a restart is unproven without a real binary; upgrade to true once verified.
+      permissions: { survivesRestart: false, approval: "native" },
+      security: {
+        nativePermissions: true,
+        protectedPaths: "tool_hook",
+        // The tool hook only rejects background work unless the option opts out.
+        backgroundWork: ctx.options.allowBackgroundWork === true ? "unobservable" : "blocked",
+      },
       usage: { tokens: true, cost: true },
       audit: true,
     }

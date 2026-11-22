@@ -13,10 +13,12 @@ function context(options: {
   messages?: unknown[]
   permissions?: unknown[]
   calls?: Calls
+  options?: Record<string, unknown>
 } = {}): OpenCodePluginContext {
   const calls = options.calls ?? {}
   return {
     app: { version: "2.2.5" },
+    options: options.options ?? {},
     agent: {
       list: async () => ({
         data: [
@@ -60,6 +62,13 @@ function context(options: {
 }
 
 describe("OpenCodeAdapter", () => {
+  it("reports background work as blocked unless the option opts out", () => {
+    expect(new OpenCodeAdapter(context()).capabilities.security.backgroundWork).toBe("blocked")
+    expect(
+      new OpenCodeAdapter(context({ options: { allowBackgroundWork: true } })).capabilities.security.backgroundWork,
+    ).toBe("unobservable")
+  })
+
   it("maps native agents to selectable descriptors", async () => {
     const adapter = new OpenCodeAdapter(context({ defaultModel: { providerID: "test", id: "model" } }))
     const agents = await adapter.listAgents()

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { parseWorkflowCommand } from "./command.js"
 import type { WorkflowService } from "./service.js"
 import { errorDetail } from "./util/redact.js"
+import { runSuffix, harnessId } from "./ui/harness.js"
 
 // Headless rendering of /flowgraph for API-driven clients (mobile, web).
 // TUI/GUI navigate and open dialogs; the server command can only reply with text.
@@ -37,7 +38,7 @@ async function runsText(service: WorkflowService): Promise<string> {
   const runs = await service.listRuns(undefined, 50)
   if (runs.length === 0) return "No workflow runs yet. Start one with `/flowgraph run <workflow-id> <objective...>`."
   const lines = runs.map(
-    (run) => `- ${run.runID} · ${run.workflowID} · ${run.status} · ${objectiveLabel(run.objective)}`,
+    (run) => `- ${run.runID} · ${run.workflowID} · ${run.status}${runSuffix(run)} · ${objectiveLabel(run.objective)}`,
   )
   return [`Runs (${runs.length}):`, ...lines].join("\n")
 }
@@ -97,8 +98,12 @@ export async function runServerCommand(
       `Run ${graph.runID} · revision ${graph.revision}`,
     ]
     if (graph.activeNode) lines.push(`Active node: ${graph.activeNode}`)
+    if (graph.harness) lines.push(`Harness: ${harnessId(graph.harness.id)} (read-only via RPC)`)
+    else if (graph.readOnly) lines.push("Run is read-only via RPC (no harness identity).")
     if (graph.blocker) lines.push(`Blocked: ${graph.blocker.message}`)
-    if (graph.blocker?.type === "human_input") lines.push("Answer this human step with RPC respondRun.")
+    if (graph.blocker?.type === "human_input" && !graph.harness && !graph.readOnly) {
+      lines.push("Answer this human step with RPC respondRun.")
+    }
     if (graph.failure) lines.push(`Failed: ${graph.failure.code} — ${graph.failure.message}`)
     if (graph.pendingPermissions.length > 0) {
       lines.push(`Waiting for ${graph.pendingPermissions.length} native permission request(s)`)

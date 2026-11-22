@@ -65,6 +65,7 @@ Omit `nodeID` when exactly one human step is waiting. A decision is stored as a 
 | Method | Purpose |
 |---|---|
 | `capabilities` | Plugin, RPC, schema, feature, and limit versions |
+| `harnessCapabilities` | Active adapter's validated harness capabilities (identity, agents, sessions, results, permissions, security, usage, audit) |
 | `listWorkflows` | Discover project workflows and validation state |
 | `getWorkflow` | Raw YAML, validated graph, agents, Mermaid |
 | `validateWorkflow` | Validate YAML without writing |
@@ -83,6 +84,16 @@ Omit `nodeID` when exactly one human step is waiting. A decision is stored as a 
 Event: `runUpdated` with project, run, workflow, status, current node, revision, timestamp, and blocker. Events are live-only notifications; reconnecting clients must call `getRun` or `listRuns`.
 
 Run details and graphs expose all active steps and blockers. The singular fields remain a primary view for existing callers. Step records from called workflows include `workflowID` and `callPath`.
+
+A run owned by another harness is visible through `listRuns`, `getRun`, and
+`getRunGraph`, with additive `harness: { id, version? }` and `readOnly: true`
+fields on that run only. OpenCode-owned and adopted legacy runs omit both, so
+their payloads are unchanged. A foreign run reports `resumable: false`, all four
+controls false, and the stored permissions; the plugin never queries the other
+harness's native session. A legacy run with no sidecar is read-only with
+`readOnly: true` and no `harness` field when the active adapter has
+`sessions.adoptLegacyRuns: false`. `pauseRun`, `resumeRun`, `respondRun`, and
+`cancelRun` still return `not_resumable` for both.
 
 All methods are location-scoped. The plugin rejects runs that belong to another project or canonical checkout. No `projectID` is accepted from the client.
 
@@ -128,6 +139,7 @@ Error data contains IDs, validation diagnostics, the current revision, or redact
 - `cancelRun` marks the run cancelled and requests interruption of every outstanding session in that run.
 - An idempotent retry with the same `requestID` returns the current run.
 - `startRun` uses `requestID` plus the workflow/objective hash to detect conflicting retries.
+- A foreign-harness run is read-only: control methods return `not_resumable` even if a client ignores the false graph controls.
 
 ## Server /flowgraph command
 
@@ -139,6 +151,11 @@ The server part registers a `flowgraph` slash command, so API-driven clients (mo
 - `/flowgraph graph <runID>` — describe one run
 
 The command replies with plain text in the invoking session as a notice that does not resume the agent. It cannot open panels or dialogs; pause, resume, and cancel stay on RPC (`pauseRun`, `resumeRun`, `cancelRun`) and the TUI/GUI surfaces.
+
+A foreign-harness run is marked with ` · [<id>]` in `runs` output. A run
+without a harness identity is marked ` · [read-only]`. `graph` adds
+`Harness: <id> (read-only via RPC)` (or `Run is read-only via RPC (no harness
+identity).`) and omits the `respondRun` hint. OpenCode output is unchanged.
 
 ## TUI
 
@@ -167,7 +184,14 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
 
 ### What it shows
 
-- Every run on the server: workflow, status, directory, and objective.
+- Every run on the server: workflow, status, directory, and objective. A foreign
+  run appends ` · [<id>]` after the status.
+- The active harness under the page header: `Active harness: <id> <version>`,
+  then its result mechanism, approval surface, protected-path level, and
+  background-work behavior. While loading it shows `Active harness: loading…`;
+  a missing or failed method shows `Active harness capabilities unavailable.`
+  without blocking runs. Warnings appear when background work is unobservable or
+  protected paths are not intercepted.
 - Workflow and run identity for the selected run.
 - Status, revision, step count, blocker, and pending native permissions.
 - A boxed top-down diagram: nodes are boxes, branches sit side by side, cycles route around a left-hand rail, long jumps around a right-hand rail, and rail edges enter boxes from the side.
@@ -175,6 +199,11 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
 - Nodes with completed (green), active (yellow), failed or routed-back (red), paused, and pending markers and colours.
 - Outcome-labelled edges, including cycles and terminal edges.
 - Active nodes are highlighted. Called workflows show child progress under their call nodes.
+- The session panel repeats the active harness lines once. The page and panel
+  add `Harness <id> · read-only in this client` for a foreign run; an unadopted
+  legacy run adds `Read-only in this client · harness identity unavailable`. Its
+  controls and session keys are gated with a toast and its native session is
+  never opened.
 
 The TUI does not render Mermaid. It renders the structured graph from `getRunGraph` directly. If the diagram does not fit the available width or height, the page falls back to a compact text list and says why.
 
@@ -206,6 +235,11 @@ Session panel:
 
 The page and panel receive `runUpdated` events and refresh periodically as a fallback.
 
+For a foreign run, `u`, `p`, `c`, `s`, `o`, and `enter` explain why the action is
+unavailable instead of acting; `r` still refreshes. The page and session panel
+never open a foreign native session. An unadopted legacy run with no harness
+identity is gated the same way.
+
 ### Loading
 
 The TUI part is exported as `./tui`. OpenCode loads it with the package's server part. For a TUI connected to a remote server, make sure the plugin is available in the TUI's plugin configuration as documented by OpenCode.
@@ -224,9 +258,20 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 - Active nodes highlighted and child sessions grouped under their call nodes.
 - Completed nodes styled green, nodes whose latest route looped back red until a later attempt passes, active nodes yellow, and failed/paused/pending nodes styled by state.
 - Run status, revision, failure reason, blocker, and pending permission count.
+- The active harness capability lines and warnings in the panel header, labeled
+  **Active harness**.
 - Click a node to open its native session. A node without a session shows a toast instead.
 - Buttons for changing runs, pause, resume, respond to a human step, cancel, and graph zoom.
 - Live updates from `runUpdated`, with polling as a fallback.
+
+A foreign-harness run adds a read-only line to the header; its picker title
+appends ` · <id>`, and selecting it explains that it is read-only in this client.
+A run without a harness identity is labeled ` · read-only` and gets the same
+read-only explanation. Open active session, Pause, Resume, Respond, Cancel, and
+child session buttons are disabled with the reason `Unavailable for <id> runs`
+(or `Read-only run` without an identity). Node clicks and the run picker do not
+open a foreign native session. Runs and Zoom remain enabled. OpenCode-owned runs
+render as before.
 
 ### Multiple runs
 

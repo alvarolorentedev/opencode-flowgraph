@@ -141,6 +141,12 @@ export const NodeResultSchema = z
 
 export type NodeResult = z.infer<typeof NodeResultSchema>
 
+/**
+ * JSON Schema for adapters that transport results as native structured output.
+ * Generated from NodeResultSchema; never maintain a second definition by hand.
+ */
+export const NodeResultJsonSchema = z.toJSONSchema(NodeResultSchema)
+
 export const ApprovalSchema = z
   .object({
     outcome: OutcomeSchema,

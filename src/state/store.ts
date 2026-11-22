@@ -1,14 +1,17 @@
-import { z } from "zod"
 import { KeyedMutex } from "../util/mutex.js"
 import { StorageKeys } from "./keys.js"
 import {
+  RunHarnessSchema,
   RunRecordSchema,
   StepRecordSchema,
   ReportRecordSchema,
+  type RunHarness,
   type RunRecord,
   type StepRecord,
   type ReportRecord,
 } from "./types.js"
+
+export { RunHarnessSchema } from "./types.js"
 
 export type JsonValue =
   | null
@@ -29,14 +32,6 @@ export interface StoragePort {
   remove(key: string): Promise<void>
   scan(options: { prefix: string; after?: string; limit?: number }): Promise<StorageScanResult>
 }
-
-export const RunHarnessSchema = z
-  .object({
-    id: z.string().min(1).max(64),
-    version: z.string().min(1).max(64).optional(),
-  })
-  .strict()
-export type RunHarness = z.infer<typeof RunHarnessSchema>
 
 export class StateCorruptionError extends Error {
   constructor(
@@ -168,10 +163,20 @@ export class WorkflowStore {
     return this.readSchema(StorageKeys.report(projectID, runID, stepID), ReportRecordSchema)
   }
 
-  async putReport(projectID: string, report: ReportRecord): Promise<ReportRecord> {
+  /**
+   * Persists the first valid report for a step and never overwrites it.
+   * In-process serialization makes the read/write canonical check race-free for
+   * one server; the storage backend has no distributed compare-and-swap.
+   */
+  async putReportOnce(projectID: string, report: ReportRecord): Promise<{ report: ReportRecord; created: boolean }> {
     const parsed = ReportRecordSchema.parse(report)
-    await this.storage.set(StorageKeys.report(projectID, parsed.runID, parsed.stepID), jsonClone(parsed))
-    return parsed
+    return this.mutex.run(`report:${parsed.runID}:${parsed.stepID}`, async () => {
+      const key = StorageKeys.report(projectID, parsed.runID, parsed.stepID)
+      const existing = await this.readSchema(key, ReportRecordSchema)
+      if (existing) return { report: existing, created: false }
+      await this.storage.set(key, jsonClone(parsed))
+      return { report: parsed, created: true }
+    })
   }
 
   async putSource(projectID: string, runID: string, source: string): Promise<void> {

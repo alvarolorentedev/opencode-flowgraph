@@ -6,6 +6,19 @@ change: the workflow YAML schema (`version: 1`) and current OpenCode behavior ar
 unchanged, and new RPC methods or stored keys are additive with dual-read of the
 old keys.
 
+## Status
+
+| Milestone | Status |
+|---|---|
+| M0 — Verify OpenCode | Automated lifecycle/restart tests are implemented and pass against a real OpenCode binary (`v2.2.5`, `@opencode/cli` 2.2.5). The manual real-model E2E record is **pending**. |
+| M1 — Contract suite, transports, recovery parity | **Implemented and tested.** `describeHarnessContract` runs every documented scenario on two capability variants, a deliberate capability lie fails, `NodeResultJsonSchema` is generated from `NodeResultSchema`, synthesized report refs are canonical, and the recovery matrix matches the tests. |
+| M2 — Capability exposure and harness-aware views | **Implemented and tested at the RPC/service/presentation level.** `harnessCapabilities`, foreign-run identity, ownership-aware controls, read-only TUI/GUI/server rendering, and fixtures are covered by tests. The manual TUI/GUI check remains pending (the verification environment has no interactive TUI/Desktop session) and real foreign-harness visuals stay fixture-only until an M4 adapter exists. |
+| M3/M4/M5 | **Not implemented.** Future milestones; no second adapter exists. |
+
+"Implemented and tested" means the default `bun run check` suite exercises the
+behavior. "Pending" means the test exists but the required real binary, model, or
+manual environment was unavailable; skipped tests are not counted as passed.
+
 ## Baseline
 
 The harness-agnostic refactor is in place:
@@ -24,19 +37,28 @@ The harness-agnostic refactor is in place:
 
 Known gaps this plan closes:
 
-- `harnessCapabilities` does not exist, and `capabilities`, `getRun`,
-  `getRunGraph`, and `listRuns` expose no harness identity.
-- `getRunGraph` computes `controls` from run status only. The engine refuses
-  foreign control, but the graph can advertise `canPause`/`canCancel` for a run
-  this client cannot control.
-- `test/contract/harness-contract.test.ts` has six test cases and does not cover
-  every scenario listed in [`adapters.md`](adapters.md#contract-tests). There is
-  no reusable `describeHarnessContract` and no capability-honesty test.
-- The structured-output JSON Schema is not derived from `NodeResultSchema`, and
-  transports without a native tool-call ID have no documented stable report ref.
-- The smoke test covers plugin load, RPC, and workflow file APIs without a model
-  run. It does not cover a human-only lifecycle or restart during an agent step.
-- There is no real-model E2E record tied to OpenCode and model versions.
+- `harnessCapabilities` now exposes the active adapter's strict, Zod-validated
+  capabilities. `getRun`, `getRunGraph`, and `listRuns` add harness identity only
+  for foreign runs and `readOnly: true` only for runs the adapter does not own, so
+  OpenCode-owned and adopted legacy payloads are unchanged.
+- `getRunGraph` controls are ownership-aware. A foreign or unadopted legacy run returns all controls false, and the read views add `readOnly: true`; `getRun` returns `resumable: false`. The engine still refuses foreign control.
+- `test/contract/harness-suite.ts` provides `describeHarnessContract` and the
+  contract test runs every scenario in [`adapters.md`](adapters.md#contract-tests)
+  against two capability variants, including capability honesty.
+- The structured-output JSON Schema is generated from `NodeResultSchema`
+  (`NodeResultJsonSchema`), and transports without a native tool-call ID have a
+  stable `syntheticReportRef`.
+- The smoke test adds a no-model human-only lifecycle over RPC; the model
+  integration adds a restart-during-agent-step case.
+- Report persistence is canonical per step: the first valid report wins and
+  concurrent or conflicting submissions cannot overwrite it.
+
+Open gaps:
+
+- The manual real-model E2E record is outstanding. Real-binary smoke and
+  model-integration runs pass against OpenCode `v2.2.5`.
+- The M2 manual TUI/GUI check is outstanding; foreign visuals are fixture-only
+  until M4.
 - Approval is native OpenCode only; there is no host approval surface.
 - Packaging has not been tested without OpenCode peers installed.
 
@@ -59,12 +81,23 @@ host or user is confirmed after M2, stop there.
 Prove the reference adapter on a real binary before changing how other hosts see
 it.
 
+**Status:** verified against OpenCode `v2.2.5` (`@opencode/cli` 2.2.5). The
+no-model lifecycle test is `test/integration/opencode-smoke.test.ts`; the
+restart-during-agent-step tests are in `test/integration/opencode-model.test.ts`
+(persisted-report completion and no-report conservative blocking). Both skip
+unless their environment flag and `OPENCODE_BIN` are present. With a real binary
+and a mock model provider they pass, including the capability values reported by
+`harnessCapabilities`. Unknown prompt admission and pending or unknown permission
+states cannot be produced deterministically by the mock provider; those recovery
+cases are covered at the `FakeHarness` contract level instead. The manual
+real-model E2E record is still pending.
+
 ### Work
 
-- Extend `test:smoke` with a no-model, human-only lifecycle across separate
-  `opencode api --standalone` calls: start a run, observe `human_input`, respond
-  through `respondRun`, observe `completed`. Add a pause/resume path and a cancel
-  path.
+- Extend `test:smoke` with a no-model, human-only lifecycle: start a run, observe
+  `human_input`, pause/resume, respond through `respondRun` until `completed`,
+  and cancel a second run at its blocker. The test uses a long-lived
+  `opencode serve` so state is shared across RPC calls.
 - Extend `test:integration` with a restart during an agent run. Stop and restart
   `opencode serve` mid-step, then assert conservative recovery: a durable report
   completes the step; an unprovable admission or terminal state blocks; the
@@ -77,17 +110,20 @@ it.
 ### Acceptance
 
 - `OPENCODE_SMOKE=1 OPENCODE_BIN=... bun run test:smoke` passes and covers the
-  human-only start → respond → completed path, pause/resume, and cancel.
+  human-only start → respond → completed path, pause/resume, and cancel. Passes
+  against OpenCode `v2.2.5`.
 - `OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=... bun run test:integration`
-  passes and includes the restart assertion.
+  passes and includes the restart assertion. Passes against OpenCode `v2.2.5`.
 - The manual E2E record is attached to the release or issue that claims
   verification.
 - `bun run check` is green.
 
 ### Tests
 
-- `test/integration/opencode-smoke.test.ts` (new lifecycle cases).
-- `test/integration/opencode-model.test.ts` (restart case).
+- `test/integration/opencode-smoke.test.ts` (new lifecycle cases, including
+  completion and a separate cancellation run).
+- `test/integration/opencode-model.test.ts` (restart with a persisted report, and
+  restart without one).
 - Manual E2E checklist in the release record.
 
 ### Risks
@@ -111,6 +147,11 @@ No adapter changes, no new RPC, no UI change, no model-routing redesign.
 ## M1 — Contract suite, transports, and recovery parity
 
 Make the adapter contract reusable before a second adapter exists.
+
+**Status:** implemented and tested. The reusable suite is
+`test/contract/harness-suite.ts`; `test/contract/harness-contract.test.ts` runs
+it on two capability variants and includes the capability-honesty cases. The
+generated schema and synthesized report reference are exported from the core.
 
 ### Work
 
@@ -172,20 +213,21 @@ No second adapter, no RPC field, no UI change, no free-text result parsing.
 Expose what the active adapter can do, and stop advertising control over runs
 that belong to another harness. This is the only milestone with a UX contract.
 
+**Status:** implemented and tested at the RPC, service, server-command, and pure
+presentation level. The manual TUI/GUI check on a real OpenCode run remains
+pending; foreign visuals are verified by fixture only until M4.
+
 ### RPC and service
 
 - Add `harnessCapabilities`: no input, output `HarnessCapabilities` (which
   already carries `id` and `version?`). Define one strict Zod schema for
   `HarnessCapabilities` and derive the TypeScript type from it, so the RPC and
   the adapter cannot drift.
-- Add optional `harness: { id, version? }` to `RunSummary`, `RunDetail`, and
-  `RunGraphOutput`. Omit it when the run belongs to the active adapter. A legacy
-  run with no sidecar is owned by the active adapter only when
-  `sessions.adoptLegacyRuns` is true, so OpenCode output stays unchanged.
-- Make run-graph controls ownership-aware. A foreign run returns `canPause`,
-  `canResume`, `canRespond`, and `canCancel` false, and `resumable` false.
-  Foreign reads use stored permissions only; never query the live native
-  session.
+- Add optional `harness: { id, version? }` and `readOnly: true` to `RunSummary`, `RunDetail`, and `RunGraphOutput`. Omit both when the active adapter owns the run. A legacy run with no sidecar is owned by the active adapter only when `sessions.adoptLegacyRuns` is true; otherwise it is read-only with no harness identity, so OpenCode output stays unchanged.
+- Make run-graph controls ownership-aware. `getRunGraph` returns `canPause`,
+  `canResume`, `canRespond`, and `canCancel` false for a run the adapter does not
+  own. `getRun` returns `resumable: false`. Foreign reads use stored permissions
+  only; never query the live native session.
 - Keep `pauseRun`, `resumeRun`, `respondRun`, and `cancelRun` refusing a foreign
   run with `not_resumable`. The UI pre-gates; the RPC is the backstop.
 - Update `docs/interfaces.md` in this milestone: add `harnessCapabilities`, the
@@ -216,14 +258,16 @@ Warnings, exact copy:
 
 Foreign runs:
 
-- TUI row appends ` · [<id>]` after the status; the panel adds
-  `Harness <id> · read-only in this client`.
+- TUI row appends ` · [<id>]` after the status; the page and panel add
+  `Harness <id> · read-only in this client`. An unadopted legacy run appends
+  ` · [read-only]` and adds `Read-only in this client · harness identity unavailable`.
 - TUI keys `u`, `p`, `c`, `s`, `o`, and `enter` are gated and explain via a
   toast; `r` still refreshes. No silent no-ops.
 - Control toast: `This run belongs to the <id> harness. Pause, resume, respond, and cancel are unavailable in this client.`
 - Session toast: `Sessions for the <id> harness open in its own client.`
-- GUI picker title appends ` · <id>`; header adds the read-only line
-  `Read-only: this run belongs to the <id> harness. Controls are unavailable in this client.`
+- GUI picker title appends ` · <id>` (or ` · read-only` when no identity is
+  known); selecting it shows the read-only line. If a foreign graph is rendered,
+  the header adds `Read-only: this run belongs to the <id> harness. Controls are unavailable in this client.`
 - GUI Pause, Resume, Respond, Cancel, Open active session, and node-session
   buttons get `disabled` and `title="Unavailable for <id> runs"`. Runs and Zoom
   stay enabled.
@@ -254,8 +298,10 @@ Accessibility and layout:
 - Existing `capabilities`, `getRun`, `getRunGraph`, and `listRuns` output is
   byte-identical for OpenCode-owned and adopted legacy runs.
 - `harnessCapabilities` returns the active adapter's honest capabilities.
-- A foreign run exposes `harness.id`, false controls, and `resumable: false`;
-  its control methods still return `not_resumable`.
+- A foreign run exposes `harness.id`, `readOnly: true`, false controls from
+  `getRunGraph`, and `resumable: false` from `getRun`; its control methods still
+  return `not_resumable`. An unadopted legacy run exposes `readOnly: true`
+  without a harness identity and is equally read-only.
 - The TUI and GUI show capability lines, warnings, the foreign badge, and
   read-only reasons; foreign sessions are not opened.
 - `bun run build:gui` passes.

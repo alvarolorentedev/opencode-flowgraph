@@ -16,8 +16,28 @@ import { parseWorkflowCommand } from "./command.js"
 import { listLocatedRuns, waitForRunSession, type LocatedRun } from "./ui/runs.js"
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
+import {
+  foreignControlTitle,
+  foreignGuiLine,
+  harnessLines,
+  harnessWarnings,
+  legacyReadOnlyPanelLine,
+  legacyReadOnlyToast,
+  legacyReadOnlyTitle,
+  runPickerSuffix,
+  type HarnessCapabilityState,
+} from "./ui/harness.js"
 
 const TAB_ID = "graph"
+
+function locked(value: RunGraphOutput): boolean {
+  return value.harness !== undefined || value.readOnly === true
+}
+
+function controlTitle(value: RunGraphOutput): string | undefined {
+  if (value.harness !== undefined) return foreignControlTitle(value.harness.id)
+  return value.readOnly === true ? legacyReadOnlyTitle : undefined
+}
 
 const css = `
 .awf-graph { display:flex; flex-direction:column; gap:10px; height:100%; min-height:0; padding:12px; font-size:12px; }
@@ -78,12 +98,14 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   const [graph, setGraph] = createSignal<RunGraphOutput>()
   const [error, setError] = createSignal<string>()
   const [loading, setLoading] = createSignal(true)
+  const [harness, setHarness] = createSignal<HarnessCapabilityState>({ status: "loading" })
   const [zoom, setZoom] = createSignal(100)
   let container: HTMLDivElement | undefined
   let renderSequence = 0
 
   const location = () => ({ directory: props.session.directory })
   const rpc = () => props.session.server.client.rpc(FlowgraphRpc)
+  const foreign = () => graph()?.harness
 
   const load = async (runID: string): Promise<boolean> => {
     try {
@@ -136,6 +158,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
           element.classList.add(node.routedBack ? "wf-rejected" : "wf-completed")
         } else if (node?.state === "failed") element.classList.add("wf-failed")
         const sessionID = nodeSession(value, mermaidID)
+        if (locked(value)) continue
         if (sessionID) element.classList.add("wf-clickable")
         element.addEventListener("click", () => {
           const session = nodeSession(value, mermaidID)
@@ -182,6 +205,15 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
     setLoading(true)
     setError(undefined)
     setGraph(undefined)
+    setHarness({ status: "loading" })
+    void rpc()
+      .harnessCapabilities(undefined, { location: location() })
+      .then((capabilities) => {
+        if (current === generation) setHarness({ status: "ready", capabilities })
+      })
+      .catch(() => {
+        if (current === generation) setHarness({ status: "error" })
+      })
     try {
       const runID = await withTimeout(
         resolveRun(),
@@ -220,12 +252,14 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const openActive = () => {
+    if (foreign()) return
     const sessionID = activeSession()
     if (!sessionID) return
     ctx.tabs.open({ server: props.session.server.id, id: sessionID }, { focus: true })
   }
 
   const pause = async () => {
+    if (foreign()) return
     const value = graph()
     if (!value) return
     try {
@@ -239,6 +273,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const resume = async () => {
+    if (foreign()) return
     const value = graph()
     if (!value) return
     const confirm = value.blockers?.some((blocker) =>
@@ -263,6 +298,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const respond = async () => {
+    if (foreign()) return
     const value = graph()
     if (!value) return
     const blockers = (value.blockers ?? [])
@@ -315,6 +351,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const cancel = async () => {
+    if (foreign()) return
     const value = graph()
     if (!value) return
     const ok = await ctx.dialogs.confirm({
@@ -364,6 +401,17 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                 <div class="awf-graph-muted">
                   Run {value.runID} · revision {value.revision}
                 </div>
+                {harnessLines(harness()).map((line) => (
+                  <div class="awf-graph-muted">{line}</div>
+                ))}
+                {harnessWarnings(harness()).map((line) => (
+                  <div class="awf-graph-warn">{line}</div>
+                ))}
+                {value.harness !== undefined
+                  ? <div class="awf-graph-warn">{foreignGuiLine(value.harness.id)}</div>
+                  : value.readOnly === true
+                    ? <div class="awf-graph-warn">{legacyReadOnlyPanelLine}</div>
+                    : null}
                 {(value.blockers ?? (value.blocker ? [value.blocker] : [])).map((blocker) => (
                   <div class="awf-graph-warn">Blocked: {blocker.message}</div>
                 ))}
@@ -383,11 +431,41 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
               </div>
               <div class="awf-graph-actions">
                 <button onClick={props.onPickRun}>Runs</button>
-                <button onClick={openActive} disabled={!activeSession()}>Open active session</button>
-                <button onClick={pause} disabled={!value.controls.canPause}>Pause</button>
-                <button onClick={resume} disabled={!value.controls.canResume}>Resume</button>
-                <button onClick={respond} disabled={!value.controls.canRespond}>Respond</button>
-                <button onClick={cancel} disabled={!value.controls.canCancel}>Cancel</button>
+                <button
+                  onClick={openActive}
+                  disabled={!activeSession() || locked(value)}
+                  title={controlTitle(value)}
+                >
+                  Open active session
+                </button>
+                <button
+                  onClick={pause}
+                  disabled={!value.controls.canPause || locked(value)}
+                  title={controlTitle(value)}
+                >
+                  Pause
+                </button>
+                <button
+                  onClick={resume}
+                  disabled={!value.controls.canResume || locked(value)}
+                  title={controlTitle(value)}
+                >
+                  Resume
+                </button>
+                <button
+                  onClick={respond}
+                  disabled={!value.controls.canRespond || locked(value)}
+                  title={controlTitle(value)}
+                >
+                  Respond
+                </button>
+                <button
+                  onClick={cancel}
+                  disabled={!value.controls.canCancel || locked(value)}
+                  title={controlTitle(value)}
+                >
+                  Cancel
+                </button>
                 <span class="awf-zoom">
                   <button onClick={() => setZoom((current) => Math.max(50, current - 10))} title="Zoom out">−</button>
                   <span>{zoom()}%</span>
@@ -401,14 +479,20 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                   <summary>{node.label} · {node.childSteps!.filter((step) => step.status === "completed").length}/{node.stepCount} child steps completed</summary>
                   <div class="awf-graph-actions">
                     {node.childSteps!.map((step) => (
-                      <button onClick={() => ctx.tabs.open({ server: props.session.server.id, id: step.sessionID }, { focus: true })}>
+                      <button
+                        onClick={() => ctx.tabs.open({ server: props.session.server.id, id: step.sessionID }, { focus: true })}
+                        disabled={locked(value)}
+                        title={controlTitle(value)}
+                      >
                         {step.callPath?.slice(1).concat(step.nodeID).join(" / ") ?? step.nodeID} · step {step.seq} · {step.status}
                       </button>
                     ))}
                   </div>
                 </details>
               ))}
-              <div class="awf-graph-muted">Click a node to open its native session.</div>
+              {locked(value)
+                ? null
+                : <div class="awf-graph-muted">Click a node to open its native session.</div>}
             </>
           )
         }}
@@ -473,12 +557,20 @@ export default Plugin.define({
           title: "Open workflow run",
           placeholder: "Search runs",
           options: result.runs.map((item) => ({
-            title: `${item.run.workflowID} · ${item.run.status}`,
+            title: `${item.run.workflowID} · ${item.run.status}${runPickerSuffix(item.run)}`,
             value: item,
             description: `${directoryLabel(item.directory)} · ${objectiveLabel(item.run.objective)}`,
           })),
         })
         if (!selected) return
+        if (selected.run.harness) {
+          toast(foreignGuiLine(selected.run.harness.id))
+          return
+        }
+        if (selected.run.readOnly) {
+          toast(legacyReadOnlyToast)
+          return
+        }
         const runSessionID =
           selected.run.runSessionID ??
           (await waitForRunSession(rpc, selected.directory, selected.run.runID))

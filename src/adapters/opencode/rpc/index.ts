@@ -27,6 +27,7 @@ import {
   WorkflowViewSchema,
 } from "../../../contract.js"
 import { RunDetailSchema, StepRecordSchema } from "../../../state/types.js"
+import { HarnessCapabilitiesSchema } from "../../../execution/harness.js"
 
 const errors = {
   not_found: DeclaredErrorSchema,
@@ -51,6 +52,10 @@ export const FlowgraphRpc = Rpc.define({
     capabilities: {
       input: z.object({}).strict().optional(),
       output: CapabilitiesOutputSchema,
+    },
+    harnessCapabilities: {
+      input: z.object({}).strict().optional(),
+      output: HarnessCapabilitiesSchema,
     },
     listWorkflows: {
       input: z.object({}).strict().optional(),

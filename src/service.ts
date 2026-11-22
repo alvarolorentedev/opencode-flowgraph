@@ -15,13 +15,15 @@ import { newRunID } from "./util/ids.js"
 import { sha256 } from "./util/hash.js"
 import { errorMessage } from "./util/redact.js"
 import { zeroUsage } from "./execution/results.js"
-import type { HarnessAdapter } from "./execution/harness.js"
+import type { HarnessAdapter, HarnessCapabilities } from "./execution/harness.js"
+import { HarnessCapabilitiesSchema } from "./execution/harness.js"
 import { NotResumableError, RunNotFoundError, type HumanDecision, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
 import {
   RunRecordSchema,
   summaryOf,
   type ProjectIdentity,
   type RunDetail,
+  type RunHarness,
   type RunRecord,
   type RunStatus,
   type RunSummary,
@@ -415,10 +417,14 @@ export class WorkflowService {
     if (run.project.canonical !== this.project.canonical) throw new RunNotFoundError(run.runID)
   }
 
-  private async ownsHarness(run: RunRecord): Promise<boolean> {
+  private async ownership(run: RunRecord): Promise<{ owned: boolean; harness?: RunHarness; readOnly?: true }> {
     const owner = await this.store.getRunHarness(this.project.id, run.runID)
-    if (owner) return owner.id === this.harness.capabilities.id
-    return this.harness.capabilities.sessions.adoptLegacyRuns
+    if (owner) {
+      if (owner.id === this.harness.capabilities.id) return { owned: true }
+      return { owned: false, harness: owner, readOnly: true }
+    }
+    if (this.harness.capabilities.sessions.adoptLegacyRuns) return { owned: true }
+    return { owned: false, readOnly: true }
   }
 
   private async ensureHarness(run: RunRecord): Promise<void> {
@@ -434,13 +440,25 @@ export class WorkflowService {
     }
   }
 
+  harnessCapabilities(): HarnessCapabilities {
+    return HarnessCapabilitiesSchema.parse(this.harness.capabilities)
+  }
+
   async listRuns(status?: RunStatus, limit = 50): Promise<RunSummary[]> {
     const runs = await this.store.listRuns(this.project.id)
-    return runs
+    const visible = runs
       .filter((run) => run.project.id === this.project.id && run.project.canonical === this.project.canonical)
       .filter((run) => status === undefined || run.status === status)
       .slice(0, Math.max(1, Math.min(limit, 200)))
-      .map(summaryOf)
+    return Promise.all(visible.map(async (run) => {
+      const ownership = await this.ownership(run)
+      const summary = summaryOf(run)
+      return {
+        ...summary,
+        ...(ownership.harness === undefined ? {} : { harness: ownership.harness }),
+        ...(ownership.readOnly ? { readOnly: true as const } : {}),
+      }
+    }))
   }
 
   async getRun(runID: string): Promise<RunDetail> {
@@ -450,22 +468,25 @@ export class WorkflowService {
     const steps = activeSteps(run)
     const currentSteps = (await Promise.all(steps.map((step) => this.store.getStep(this.project.id, run.runID, step.stepID))))
       .filter((step): step is StepRecord => step !== undefined)
-    const owned = await this.ownsHarness(run)
+    const ownership = await this.ownership(run)
     return {
       run,
       currentStep: currentSteps.find((step) => step.stepID === run.activeStep?.stepID) ?? null,
       currentSteps,
       blockers: blockersOf(run),
-      pendingPermissions: owned ? await this.runner.livePermissions(run) : run.pendingPermissions,
+      pendingPermissions: ownership.owned ? await this.runner.livePermissions(run) : run.pendingPermissions,
       mermaid: renderMermaid(buildGraph(run.workflowSnapshot)),
-      resumable: owned && isResumable(run),
+      resumable: ownership.owned && isResumable(run),
+      ...(ownership.harness === undefined ? {} : { harness: ownership.harness }),
+      ...(ownership.readOnly ? { readOnly: true as const } : {}),
     }
   }
 
   async getRunGraph(runID: string): Promise<ReturnType<typeof buildRunGraph>> {
     const run = await this.requireRun(runID)
-    const permissions = (await this.ownsHarness(run)) ? await this.runner.livePermissions(run) : run.pendingPermissions
-    return buildRunGraph(run, permissions)
+    const ownership = await this.ownership(run)
+    const permissions = ownership.owned ? await this.runner.livePermissions(run) : run.pendingPermissions
+    return buildRunGraph(run, permissions, ownership.harness, ownership.readOnly === true)
   }
 
   async getRunStep(runID: string, stepID: string): Promise<StepRecord> {

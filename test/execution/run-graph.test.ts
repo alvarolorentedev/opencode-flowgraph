@@ -238,6 +238,34 @@ nodes:
     expect(graph.controls).toMatchObject({ canResume: false, canRespond: true })
   })
 
+  it("returns false controls and harness identity for a foreign run", () => {
+    const run = makeRunRecord({ status: "running", currentNode: "developer" })
+    const owned = buildRunGraph(run)
+    expect(owned.harness).toBeUndefined()
+    expect(owned.controls).toMatchObject({ canPause: true, canCancel: true })
+
+    const foreign = buildRunGraph(run, [], { id: "other-harness", version: "1.0.0" })
+    expect(RunGraphOutputSchema.safeParse(foreign).success).toBe(true)
+    expect(foreign.harness).toEqual({ id: "other-harness", version: "1.0.0" })
+    expect(foreign.controls).toEqual({
+      canPause: false,
+      canResume: false,
+      canRespond: false,
+      canCancel: false,
+    })
+
+    const legacy = buildRunGraph(run, [], undefined, true)
+    expect(RunGraphOutputSchema.safeParse(legacy).success).toBe(true)
+    expect(legacy.harness).toBeUndefined()
+    expect(legacy.readOnly).toBe(true)
+    expect(legacy.controls).toEqual({
+      canPause: false,
+      canResume: false,
+      canRespond: false,
+      canCancel: false,
+    })
+  })
+
   it("returns only JSON values for parallel runs and running steps", () => {
     const workflow = parseWorkflowSource(
       `version: 1

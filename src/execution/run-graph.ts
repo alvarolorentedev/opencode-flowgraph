@@ -1,10 +1,15 @@
 import { buildMermaidModel, renderMermaid } from "../workflow/mermaid.js"
 import { buildGraph, resolveTransition } from "../workflow/graph.js"
 import type { RunGraphNode, RunGraphOutput } from "../contract.js"
-import type { RunRecord, PermissionSummary, StepSummary } from "../state/types.js"
+import type { RunRecord, PermissionSummary, StepSummary, RunHarness } from "../state/types.js"
 import { activeSteps, blockersOf, displayNode } from "./checkpoint.js"
 
-export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSummary[] = run.pendingPermissions): RunGraphOutput {
+export function buildRunGraph(
+  run: RunRecord,
+  pendingPermissions: PermissionSummary[] = run.pendingPermissions,
+  harness?: RunHarness,
+  readOnly = false,
+): RunGraphOutput {
   const graph = buildGraph(run.workflowSnapshot)
   const mermaidNodes = buildMermaidModel(graph).nodes.flatMap((node) =>
     node.nodeId === undefined ? [] : [{ nodeID: node.nodeId, mermaidID: node.id }],
@@ -80,6 +85,7 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
   })
 
   const terminal = run.status === "completed" || run.status === "failed" || run.status === "cancelled"
+  const foreign = readOnly || harness !== undefined
   return {
     runID: run.runID,
     workflowID: run.workflowID,
@@ -100,19 +106,21 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
     mermaidNodes,
     activeMermaidID: mermaidNodes.find((node) => node.nodeID === activeNode)?.mermaidID ?? null,
     controls: {
-      canPause: run.status === "running" || run.status === "pausing",
-      canResume: pendingPermissions.length === 0 && (
+      canPause: !foreign && (run.status === "running" || run.status === "pausing"),
+      canResume: !foreign && pendingPermissions.length === 0 && (
         (run.status === "paused" && run.pause?.reason !== "route") ||
         (humanWaiting.length === 0 && (
           run.status === "blocked" ||
           (run.status === "running" && blockers.some((blocker) => blocker.type !== "permission"))
         ))
       ),
-      canRespond: humanWaiting.length > 0 && run.status !== "paused" && run.status !== "pausing",
-      canCancel: !terminal,
+      canRespond: !foreign && humanWaiting.length > 0 && run.status !== "paused" && run.status !== "pausing",
+      canCancel: !foreign && !terminal,
     },
     pendingPermissions,
     blocker: run.blocker === null ? null : { type: run.blocker.type, message: run.blocker.message },
     failure: run.failure,
+    ...(harness === undefined ? {} : { harness }),
+    ...(readOnly ? { readOnly: true as const } : {}),
   }
 }

@@ -2,6 +2,7 @@ import { NodeResultSchema, type NodeResult } from "../workflow/schema.js"
 import type { WorkflowStore } from "../state/store.js"
 import type { ReportRecord } from "../state/types.js"
 import type { SessionRef } from "./harness.js"
+import { sha256 } from "../util/hash.js"
 
 export type ActiveInvocation = {
   runID: string
@@ -52,6 +53,20 @@ export type ReportSubmission = {
   reportedAt?: number
 }
 
+/**
+ * Deterministic report reference for transports without a native tool-call ID.
+ * Namespaced so it cannot collide with a native ID, and bounded to the
+ * 128-character `ReportRecord.toolCallID` field.
+ */
+export function syntheticReportRef(
+  runID: string,
+  stepID: string,
+  sessionID: SessionRef,
+  attempt: number,
+): string {
+  return `flowgraph:synthetic:${sha256(`${runID}\u0000${stepID}\u0000${sessionID}\u0000${attempt}`)}`
+}
+
 export class ReportIntake {
   constructor(
     private readonly store: WorkflowStore,
@@ -67,9 +82,6 @@ export class ReportIntake {
           "Finish the node normally or use the workflow RPC API to start a run.",
       )
     }
-    if (invocation.reported >= 5) {
-      throw new Error("too many workflow reports for this step; stop calling flowgraph_report")
-    }
     if (invocation.allowedOutcomes.length > 0 && !invocation.allowedOutcomes.includes(input.result.outcome)) {
       throw new Error(
         `outcome "${input.result.outcome}" is not declared for node "${invocation.nodeID}". ` +
@@ -78,12 +90,15 @@ export class ReportIntake {
     }
 
     const result = NodeResultSchema.parse(input.result)
-    const existing = await this.store.getReport(invocation.projectID, invocation.runID, invocation.stepID)
-    if (existing?.toolCallID === input.toolCallRef) {
-      if (JSON.stringify(existing.result) === JSON.stringify(result)) return existing
-      throw new Error("a different result was already reported for this workflow tool call")
+    if (invocation.reported >= 5) {
+      // An exact duplicate cannot change the canonical report, so keep it idempotent after the cap.
+      const canonical = await this.store.getReport(invocation.projectID, invocation.runID, invocation.stepID)
+      if (canonical?.toolCallID === input.toolCallRef && JSON.stringify(canonical.result) === JSON.stringify(result)) {
+        invocation.lastReport = canonical
+        return canonical
+      }
+      throw new Error("too many workflow reports for this step; stop calling flowgraph_report")
     }
-
     invocation.reported += 1
     const report: ReportRecord = {
       schemaVersion: 1,
@@ -96,8 +111,19 @@ export class ReportIntake {
       reportedAt: input.reportedAt ?? this.now(),
       attempt: invocation.attempt,
     }
-    invocation.lastReport = report
-    await this.store.putReport(invocation.projectID, report)
-    return report
+    const { report: stored, created } = await this.store.putReportOnce(invocation.projectID, report)
+    if (!created) {
+      if (stored.toolCallID !== input.toolCallRef) {
+        throw new Error("a report already exists for this workflow step; the first valid report is canonical")
+      }
+      if (JSON.stringify(stored.result) !== JSON.stringify(result)) {
+        throw new Error("a different result was already reported for this workflow tool call")
+      }
+      invocation.lastReport = stored
+      return stored
+    }
+
+    invocation.lastReport = stored
+    return stored
   }
 }

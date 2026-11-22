@@ -17,6 +17,24 @@ Statuses: `running`, `pausing`, `paused`, `blocked`, `completed`, `failed`, `can
 
 The scheduler checkpoints the runnable branches, active sessions, pending joins, and call frames. Before prompting an agent, it reserves a step slot and records the session and prompt ID. The root budget applies across all branches and calls. Each completion records the step, then advances its branch and updates the join in one run checkpoint. Cancel, fatal failure, and timeout stop admission and request interrupts for that run's outstanding sessions.
 
+## Structured reports
+
+The first valid report persisted for a run/step is canonical. The store
+serializes that check per step:
+
+- an identical resubmission with the same report reference returns the stored
+  report and is not persisted twice, even after the per-step attempt cap;
+- a conflicting result for the same reference is rejected;
+- a different reference for the same step is rejected without changing the
+  canonical report;
+- invalid or undeclared outcomes and reports outside an active invocation are
+  rejected before persistence.
+
+This is single-server serialization, not distributed exactly-once. A retried
+node can still repeat external side effects. OpenCode transports reports through
+`flowgraph_report`; other transports use their native structured output and
+`syntheticReportRef`.
+
 ## Storage
 
 Runtime state lives in OpenCode plugin storage, keyed by project:
@@ -33,7 +51,7 @@ v1/idem/<projectID>/<sha256(requestID)>
 
 Workflow definitions remain YAML files in `.opencode/workflows`. Runtime checkpoints are never written into the repository.
 
-The `run-harness` sidecar records which adapter created a run. `RunRecord` is unchanged, so existing runs and older binaries remain compatible; older binaries simply ignore the sidecar. No migration is required. A run without a sidecar is a legacy run: OpenCode adopts it; a different adapter refuses to resume it. This prevents one harness from controlling another harness's native sessions.
+The `run-harness` sidecar records which adapter created a run. `RunRecord` is unchanged, so existing runs and older binaries remain compatible; older binaries simply ignore the sidecar. No migration is required. A run without a sidecar is a legacy run: OpenCode adopts it; a different adapter refuses to resume it. This prevents one harness from controlling another harness's native sessions. Foreign run views use the stored sidecar and permissions only; they never query the other harness's live session.
 
 Storage has no transactions or compare-and-swap. A host-local file lock protects ownership of each run. After an unclean shutdown, recovery retries busy run locks until they become available. In-process serialization protects run transitions, idempotent start admission, and the stored-run cap. Control RPCs require the current revision. Use one OpenCode server per project database.
 
@@ -45,6 +63,7 @@ Storage has no transactions or compare-and-swap. A host-local file lock protects
 | Prompt admitted, node still active | Wait/reconcile; do not prompt again |
 | Node succeeded and valid report exists | Persist the step and continue |
 | Node succeeded but report is missing | Block with `missing_report`; require an explicit resume |
+| First valid report exists | Complete the step; later duplicate/conflicting submissions cannot replace it |
 | Node failed or interrupted | Fail on native failure. Block the affected branch on interruption. |
 | No terminal idle outcome | Block with `ambiguous_node` |
 | Branch waiting at a human step | Preserve the `human_input` blocker; do not prompt |
@@ -77,7 +96,7 @@ Node sessions are child sessions of the workflow-run session. OpenCode's native 
 - The plugin never auto-approves a permission.
 - The plugin adds no Git side effects: no branches, commits, pushes, pull requests, worktrees, or release process.
 - Agents may use Git under their own native permissions and project policy.
-- Background `subagent` and `shell` calls are rejected inside workflow sessions by default because they would outlive the agent step. Set the plugin option `allowBackgroundWork: true` to opt out.
+- Background `subagent` and `shell` calls are rejected inside workflow sessions by default because they would outlive the agent step. Set the plugin option `allowBackgroundWork: true` to opt out; the reported `security.backgroundWork` then becomes `unobservable` and the TUI/GUI show the background-work warning.
 - Workflow nodes cannot modify protected configuration paths: `.opencode`, `opencode.json`, `opencode.jsonc`, `AGENTS.md`, `.git`, and `.github`. File edits are blocked directly; destructive shell commands are blocked by a command-text guard. Reads remain allowed.
 - Add project-specific protected paths with the plugin option `protectedPaths: ["infra", ".env"]`. The shell guard is heuristic; native permissions remain the security boundary.
 - Workflow file writes are restricted to `.opencode/workflows`, reject symlinks/path traversal, use atomic replacement, and require the current content hash.

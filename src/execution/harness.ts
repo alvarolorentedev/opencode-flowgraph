@@ -1,3 +1,4 @@
+import { z } from "zod"
 import type { PermissionSummary, ToolAudit, UsageEstimate } from "../state/types.js"
 import type { AgentDescriptor } from "../workflow/validator.js"
 
@@ -31,44 +32,58 @@ export type PendingPermissions =
 
 export type SubmissionState = "admitted" | "not_admitted" | "unknown"
 
-export type HarnessCapabilities = {
-  id: string
-  displayName: string
-  version?: string
+export const HarnessCapabilitiesSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    displayName: z.string().min(1).max(128),
+    version: z.string().min(1).max(64).optional(),
 
-  agents: {
-    discovery: "native" | "configured"
-  }
+    agents: z
+      .object({
+        discovery: z.enum(["native", "configured"]),
+      })
+      .strict(),
 
-  sessions: {
-    /** Can create a grouping/root session that is not a node. */
-    runScope: boolean
-    /** May adopt runs stored before harness identity existed. Only OpenCode. */
-    adoptLegacyRuns: boolean
-  }
+    sessions: z
+      .object({
+        /** Can create a grouping/root session that is not a node. */
+        runScope: z.boolean(),
+        /** May adopt runs stored before harness identity existed. Only OpenCode. */
+        adoptLegacyRuns: z.boolean(),
+      })
+      .strict(),
 
-  results: {
-    mechanism: "native_tool" | "structured_output" | "mcp_tool" | "none"
-    /** Can ask the same native session for a corrected result. */
-    corrections: boolean
-  }
+    results: z
+      .object({
+        mechanism: z.enum(["native_tool", "structured_output", "mcp_tool", "none"]),
+        /** Can ask the same native session for a corrected result. */
+        corrections: z.boolean(),
+      })
+      .strict(),
 
-  permissions: {
-    /** Pending requests remain queryable after a process restart. */
-    survivesRestart: boolean
-    /** Who answers approval prompts: the harness UI, the host, or nobody. */
-    approval: "native" | "host" | "none"
-  }
+    permissions: z
+      .object({
+        /** Pending requests remain queryable after a process restart. */
+        survivesRestart: z.boolean(),
+        /** Who answers approval prompts: the harness UI, the host, or nobody. */
+        approval: z.enum(["native", "host", "none"]),
+      })
+      .strict(),
 
-  security: {
-    nativePermissions: boolean
-    protectedPaths: "tool_hook" | "approval_hook" | "none"
-    backgroundWork: "blocked" | "unobservable"
-  }
+    security: z
+      .object({
+        nativePermissions: z.boolean(),
+        protectedPaths: z.enum(["tool_hook", "approval_hook", "none"]),
+        backgroundWork: z.enum(["blocked", "unobservable"]),
+      })
+      .strict(),
 
-  usage: { tokens: boolean; cost: boolean }
-  audit: boolean
-}
+    usage: z.object({ tokens: z.boolean(), cost: z.boolean() }).strict(),
+    audit: z.boolean(),
+  })
+  .strict()
+export type HarnessCapabilities = z.infer<typeof HarnessCapabilitiesSchema>
+
 
 export interface HarnessAdapter {
   readonly capabilities: HarnessCapabilities

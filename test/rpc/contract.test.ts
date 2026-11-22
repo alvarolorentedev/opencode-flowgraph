@@ -19,6 +19,7 @@ describe("flowgraph RPC contract", () => {
         "getRunGraph",
         "getRunStep",
         "getWorkflow",
+        "harnessCapabilities",
         "listRuns",
         "listWorkflows",
         "pauseRun",
@@ -56,6 +57,29 @@ describe("flowgraph RPC contract", () => {
   it("validates workflow input size and unknown fields", () => {
     expect(ValidateWorkflowInputSchema.safeParse({ yaml: "version: 1", extra: true }).success).toBe(false)
     expect(StartRunInputSchema.safeParse({ workflowID: "sample", objective: "x", requestID: "r1" }).success).toBe(true)
+  })
+
+  it("validates the harnessCapabilities payload", () => {
+    const schema = FlowgraphRpc.methods.harnessCapabilities.output as unknown as z.ZodTypeAny
+    const capabilities = {
+      id: "opencode",
+      displayName: "OpenCode",
+      version: "2.2.5",
+      agents: { discovery: "native" },
+      sessions: { runScope: true, adoptLegacyRuns: true },
+      results: { mechanism: "native_tool", corrections: true },
+      permissions: { survivesRestart: true, approval: "native" },
+      security: { nativePermissions: true, protectedPaths: "tool_hook", backgroundWork: "blocked" },
+      usage: { tokens: true, cost: true },
+      audit: true,
+    }
+    expect(schema.safeParse(capabilities).success).toBe(true)
+    expect(schema.safeParse({ ...capabilities, extra: true }).success).toBe(false)
+    expect(schema.safeParse({ ...capabilities, results: { mechanism: "tool" } }).success).toBe(false)
+    expect(schema.safeParse({ ...capabilities, security: { ...capabilities.security, backgroundWork: "maybe" } }).success)
+      .toBe(false)
+    expect((FlowgraphRpc.methods.harnessCapabilities.input as unknown as z.ZodTypeAny).safeParse(undefined).success)
+      .toBe(true)
   })
 
   it("validates the capabilities and runUpdated payloads", () => {
