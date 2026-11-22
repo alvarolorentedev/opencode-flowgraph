@@ -55,18 +55,19 @@ export const LimitsSchema = z
   })
   .strict()
 
+const RoutesSchema = z
+  .record(OutcomeSchema, TargetSchema)
+  .refine((routes) => {
+    const count = Object.keys(routes).length
+    return count >= 1 && count <= HARD_LIMITS.maxRoutesPerNode
+  }, `routes must contain between 1 and ${HARD_LIMITS.maxRoutesPerNode} outcomes`)
+
 const AgentNodeSchema = z
   .object({
     agent: AgentRefSchema,
     label: z.string().min(1).max(80).optional(),
     next: TargetSchema.optional(),
-    routes: z
-      .record(OutcomeSchema, TargetSchema)
-      .refine((routes) => {
-        const count = Object.keys(routes).length
-        return count >= 1 && count <= HARD_LIMITS.maxRoutesPerNode
-      }, `routes must contain between 1 and ${HARD_LIMITS.maxRoutesPerNode} outcomes`)
-      .optional(),
+    routes: RoutesSchema.optional(),
   })
   .strict()
   .superRefine((node, ctx) => {
@@ -78,6 +79,14 @@ const AgentNodeSchema = z
       })
     }
   })
+
+const HumanNodeSchema = z
+  .object({
+    human: z.literal(true),
+    label: z.string().min(1).max(80).optional(),
+    routes: RoutesSchema,
+  })
+  .strict()
 
 const ForkNodeSchema = z.object({
   label: z.string().min(1).max(80).optional(),
@@ -92,7 +101,7 @@ const CallNodeSchema = z.object({
   routes: z.object({ complete: TargetSchema, pause: TargetSchema }).strict(),
 }).strict()
 
-export const NodeSchema = z.union([AgentNodeSchema, ForkNodeSchema, CallNodeSchema])
+export const NodeSchema = z.union([AgentNodeSchema, HumanNodeSchema, ForkNodeSchema, CallNodeSchema])
 
 export const WorkflowSchema = z
   .object({

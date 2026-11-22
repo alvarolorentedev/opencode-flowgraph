@@ -111,6 +111,31 @@ describe("WorkflowService", () => {
     await expect(service.saveWorkflow("sample", invalid, null)).rejects.toBeInstanceOf(InvalidWorkflowError)
     expect((await service.listWorkflows()).workflows).toEqual([])
   })
+
+  it("routes a human decision through the service", async () => {
+    const { service, store, project } = await setup()
+    const workflow = `version: 1
+name: approval
+entry: signoff
+limits: { max_steps: 4 }
+nodes:
+  signoff: { human: true, routes: { approved: ship } }
+  ship: { agent: reviewer, next: complete }
+`
+    await service.saveWorkflow("approval", workflow, null)
+    const started = await service.startRun("approval", "approve it", "request-human")
+    const waiting = await waitForRun(store, project.id, started.runID, (run) => run.status === "blocked")
+    expect(waiting.blocker).toMatchObject({ type: "human_input", nodeID: "signoff", outcomes: ["approved"] })
+    expect((await service.getRun(started.runID)).resumable).toBe(false)
+    expect((await service.getRunGraph(started.runID)).controls.canRespond).toBe(true)
+
+    await service.respondRun(started.runID, "decision-1", waiting.revision, {
+      outcome: "approved",
+      feedback: "ship it",
+    })
+    const final = await waitForRun(store, project.id, started.runID, (run) => run.status === "completed")
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["signoff", "ship"])
+  })
 })
 
 const parent = `version: 1

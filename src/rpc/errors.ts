@@ -3,6 +3,7 @@ import { StateCorruptionError, RevisionConflictError } from "../state/store.js"
 import { ProjectBusyError, RunOwnershipError } from "../state/concurrency.js"
 import {
   AmbiguousResumeError,
+  InvalidHumanResponseError,
   NotResumableError,
   PermissionPendingError,
   RunNotFoundError,
@@ -76,6 +77,9 @@ export function toRpcError(context: ErrorContext, error: unknown): unknown {
   }
   if (error instanceof AmbiguousResumeError) {
     return context.error("ambiguous_requires_confirmation", error.message, { message: error.message })
+  }
+  if (error instanceof InvalidHumanResponseError) {
+    return context.error("invalid_input", error.message, { message: error.message })
   }
   if (error instanceof NotResumableError) {
     return context.error("not_resumable", error.message, { message: error.message })

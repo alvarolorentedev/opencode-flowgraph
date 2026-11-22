@@ -73,7 +73,7 @@ nodes:
 - `version` must be `1`.
 - `name` and every node ID are lowercase slugs.
 - `entry` must be a node ID.
-- An agent node defines exactly one of `next` or `routes`.
+- An agent node defines exactly one of `next` or `routes`. A human node always defines `routes`.
 - `next` is unconditional.
 - `routes` maps structured outcomes to targets.
 - `complete` and `pause` are reserved terminal targets.
@@ -102,13 +102,33 @@ The parent supplies the overall step, wall-clock, and recovery budgets. Each wor
 
 Parallel branches and runs in the same checkout share files. Coordinate writes when agents can edit the same paths.
 
+### Human steps
+
+A node with `human: true` waits for a person instead of starting an agent:
+
+```yaml
+nodes:
+  signoff:
+    human: true
+    label: Approve the release
+    routes:
+      approved: deploy
+      rejected: developer
+```
+
+- A human node must declare `routes`; `agent` and `next` are rejected.
+- Reaching it puts the branch in `blocked` with a `human_input` blocker. Nothing is prompted.
+- Answer it with `respondRun` (TUI: `u` or `p`; Desktop: **Respond**) using one declared outcome plus optional summary and feedback. The decision is recorded as a completed step with `agentID: "human"` and counts toward `max_steps`.
+- The decision's summary and feedback are handed to the next node exactly like an agent result.
+- A waiting human step survives restart. `resumeRun` does not answer it.
+
 ### Limits
 
 `limits` and `max_steps` are required. Other limits have defaults.
 
 | Limit | Default | Meaning |
 |---|---|---|
-| `max_steps` | required | Node executions, including repetitions |
+| `max_steps` | required | Agent executions and human decisions, including repetitions |
 | `timeout_seconds` | `3600` | Wall-clock run deadline |
 | `node_timeout_seconds` | unset | Bound for one node; the runner interrupts its session on timeout |
 | `max_result_retries` | `2` | Correction turns after a missing report |
@@ -117,7 +137,7 @@ Parallel branches and runs in the same checkout share files. Coordinate writes w
 
 ## Structured outcomes
 
-V2 session prompts do not support a native response schema. The plugin registers a typed tool, `flowgraph_report`, which the node prompt asks the agent to call exactly once when finished:
+V2 session prompts do not support a native response schema. The plugin registers a typed tool, `flowgraph_report`, which the node prompt asks the agent to call exactly once when finished. Human nodes submit the same shape through `respondRun`:
 
 ```json
 {
@@ -143,7 +163,7 @@ The tool is registered for the whole location because OpenCode plugin tools are 
 Runnable examples live in [`examples/.opencode`](../examples/.opencode):
 
 - `agents/` — developer, reviewer, security, tester, designer, and product owner agents
-- `workflows/development.yaml` — development, review, and security loop
+- `workflows/development.yaml` — development, review, security, and human signoff loop
 - `workflows/review.yaml` — a smaller two-stage review loop
 - `workflows/product-delivery.yaml` — product, design, build, and review flow
 - `workflows/parallel-review.yaml` — parallel security and review branches with a workflow call and a join

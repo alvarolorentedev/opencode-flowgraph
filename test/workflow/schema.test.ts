@@ -165,6 +165,53 @@ describe("mermaid generation", () => {
   })
 })
 
+describe("human nodes", () => {
+  const human = `
+version: 1
+name: approval
+entry: developer
+limits: { max_steps: 6 }
+nodes:
+  developer: { agent: developer, next: signoff }
+  signoff:
+    human: true
+    label: Approve the release
+    routes:
+      approved: ship
+      rejected: developer
+  ship: { agent: reviewer, next: complete }
+`
+
+  it("parses, validates, and routes human steps without an agent", () => {
+    const parsed = parseWorkflowSource(human, { workflowID: "approval" })
+    expect(parsed.errors).toEqual([])
+    expect(parsed.workflow?.nodes.signoff).toMatchObject({ human: true, label: "Approve the release" })
+    const graph = buildGraph(parsed.workflow!)
+    expect(graph.nodes.signoff).toMatchObject({ human: true, label: "Approve the release" })
+    expect(validOutcomes(graph, "signoff")).toEqual(["approved", "rejected"])
+    expect(resolveTransition(graph, "signoff", "approved")).toBe("ship")
+    expect(validateWorkflow(parsed.workflow!, agents).valid).toBe(true)
+    expect(renderMermaid(graph)).toContain("Approve the release (human)")
+  })
+
+  it("requires routes and rejects agent or next fields", () => {
+    const noRoutes = parseWorkflowSource(
+      human.replace("    routes:\n      approved: ship\n      rejected: developer\n", ""),
+      { workflowID: "approval" },
+    )
+    expect(noRoutes.workflow).toBeUndefined()
+    const withAgent = parseWorkflowSource(human.replace("    human: true\n", "    human: true\n    agent: developer\n"), {
+      workflowID: "approval",
+    })
+    expect(withAgent.workflow).toBeUndefined()
+    const withNext = parseWorkflowSource(
+      human.replace("    routes:\n      approved: ship\n      rejected: developer\n", "    next: ship\n"),
+      { workflowID: "approval" },
+    )
+    expect(withNext.workflow).toBeUndefined()
+  })
+})
+
 describe("structured fork validation", () => {
   const source = `version: 1
 name: parallel
@@ -187,6 +234,22 @@ nodes:
 
   it("accepts nested forks and loop routes contained in a branch", () => {
     expect(diagnostics(source)).toEqual([])
+  })
+
+  it("allows a human branch but not a human join", () => {
+    const fork = `version: 1
+name: approval
+entry: dispatch
+limits: { max_steps: 6 }
+nodes:
+  dispatch: { fork: [review, approve], join: merge }
+  review: { agent: reviewer, next: merge }
+  approve: { human: true, routes: { approved: merge } }
+  merge: { agent: developer, next: complete }
+`
+    expect(diagnostics(fork)).toEqual([])
+    expect(diagnostics(fork.replace("merge: { agent: developer, next: complete }", "merge: { human: true, routes: { done: complete } }")))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ code: "invalid_join" })]))
   })
 
   it("rejects duplicate, overlapping, and escaping branches and bypass edges", () => {

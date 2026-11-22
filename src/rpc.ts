@@ -11,6 +11,7 @@ import {
   ListRunsInputSchema,
   ListRunsOutputSchema,
   ListWorkflowsOutputSchema,
+  RespondRunInputSchema,
   ResumeRunInputSchema,
   RunControlOutputSchema,
   RunGraphOutputSchema,
@@ -108,6 +109,11 @@ export const FlowgraphRpc = Rpc.define({
     },
     resumeRun: {
       input: ResumeRunInputSchema,
+      output: RunControlOutputSchema,
+      errors,
+    },
+    respondRun: {
+      input: RespondRunInputSchema,
       output: RunControlOutputSchema,
       errors,
     },

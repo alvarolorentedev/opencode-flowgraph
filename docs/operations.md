@@ -4,12 +4,13 @@
 
 Statuses: `running`, `pausing`, `paused`, `blocked`, `completed`, `failed`, `cancelled`.
 
-`blocked` means all remaining branches need a native permission decision or explicit retry. While a sibling can make progress, the run stays `running` and exposes the blocked step separately.
+`blocked` means all remaining branches need a native permission decision, a human decision, or explicit retry. While a sibling can make progress, the run stays `running` and exposes the blocked step separately.
 
-- Each run has a stable root session. Agent steps use fresh native child sessions, including steps from called workflows.
+- Each run has a stable root session. Agent steps use fresh native child sessions, including steps from called workflows. Human steps use no session; their decision is recorded against the root session.
 - Separate runs in the same checkout can execute concurrently. They share the files and can conflict if agents write the same paths.
 - The root workflow and all referenced definitions and hashes are snapshotted at start. Native agents are resolved when each session starts, so changes to agent definitions affect later steps.
 - A user pause drains admitted steps and preserves pending branches. A root terminal `pause` ends the run in a non-resumable state. A child's `pause` follows the caller's declared route.
+- A waiting human step checkpoints as a branch blocker. It never prompts, never times out as a node, and survives restart until `respondRun` records the decision.
 - Cost and token usage are provider-reported estimates. Restart reconciliation protects workflow state, while external tool effects can still repeat after a confirmed retry.
 
 ## Execution model
@@ -43,6 +44,7 @@ Storage has no transactions or compare-and-swap. A host-local file lock protects
 | Node succeeded but report is missing | Block with `missing_report`; require an explicit resume |
 | Node failed or interrupted | Fail on native failure. Block the affected branch on interruption. |
 | No terminal idle outcome | Block with `ambiguous_node` |
+| Branch waiting at a human step | Preserve the `human_input` blocker; do not prompt |
 | Branch arrived at a join | Preserve the arrival and reconcile outstanding branches |
 | Recovery attempts exhausted | Fail with `recovery_exhausted` |
 | Run deadline expired | Fail with `run_timeout` |
@@ -58,6 +60,7 @@ Node sessions are child sessions of the workflow-run session. OpenCode's native 
 - Missing/invalid report after bounded corrections: node/run fails.
 - Native failure or interruption: explicit failure or blocked state.
 - Permission pending: blocked, never auto-approved.
+- Human step pending: blocked with `human_input`, never auto-answered.
 - Ambiguous active node after restart: blocked, never automatically re-prompted.
 - Storage corruption: invalid state, fail closed.
 - Duplicate runners are excluded by the per-run ownership lock.

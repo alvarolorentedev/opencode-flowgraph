@@ -13,8 +13,9 @@ Define your development loop once — plan, build, review, secure, ship — as a
 ## What you get
 
 - **Your process, not ad-hoc prompts.** Write the review loop once and run it against every change. Same agents, same gates, same outcomes.
-- **Your agents, not a new runtime.** Workflow nodes use native OpenCode agents from `.opencode/agents`. No hosted backend, no custom LLM client, no second tool to learn.
+- **Your agents, not a new runtime.** Agent nodes use native OpenCode agents from `.opencode/agents`; human nodes wait for you. No hosted backend, no custom LLM client, no second tool to learn.
 - **Real quality loops.** Agents report structured outcomes; the graph routes on them. `changes_requested` sends work back; `approved` moves it forward; `blocked` pauses for a human.
+- **Human gates.** Mark a node `human: true` to wait for an approval or decision. The chosen outcome and feedback route into the graph like any agent result.
 - **Runs that survive interruptions.** Checkpoints are persisted after every transition. Restart the server and completed work is not redone; ambiguous work is blocked, never silently re-run.
 - **Parallel and reusable workflows.** Fork into concurrent branches, join their results, and call another workflow by name. Start multiple runs in the same checkout.
 - **Visibility and control.** Follow active steps in the TUI or Desktop graph, open their sessions, and pause, resume, or cancel a run.
@@ -28,7 +29,7 @@ You bring two things:
 1. **Agents** — native Markdown agents in `.opencode/agents/*.md`, owned by OpenCode.
 2. **A workflow** — a YAML graph in `.opencode/workflows/*.yaml`, owned by this plugin.
 
-The plugin validates the graph, then runs one agent at a time in a fresh OpenCode session. Each agent does its job and reports an outcome. The validated graph — not the agent — decides where the run goes next. State is checkpointed after every step, so runs can pause and recover without losing completed work.
+The plugin validates the graph, then runs one node at a time. Agent nodes use a fresh OpenCode session; human nodes wait for a decision. Each node reports an outcome. The validated graph — not the agent — decides where the run goes next. State is checkpointed after every step, so runs can pause and recover without losing completed work.
 
 ## Onboarding
 
@@ -47,7 +48,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.8.2"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.10.0"]
 }
 ```
 
@@ -90,12 +91,19 @@ nodes:
   reviewer:
     agent: reviewer
     routes:
-      approved: complete
+      approved: signoff
       changes_requested: developer
       blocked: pause
+
+  signoff:
+    human: true
+    label: Approve the release
+    routes:
+      approved: complete
+      rejected: developer
 ```
 
-The file stem must match `name`. Every node must be reachable from `entry`, and each node defines either `next` or `routes`. See the [workflow guide](docs/guide.md) for the full schema and limits.
+The file stem must match `name`. Every node must be reachable from `entry`. An agent node defines exactly one of `next` or `routes`; a human node defines `routes`. See the [workflow guide](docs/guide.md) for the full schema and limits.
 
 ### 4. Run it
 
@@ -109,9 +117,9 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 
 ### 5. Watch and steer
 
-- **TUI** — `/flowgraph` opens the live graph. Use `enter` for the primary active session, `s` to pick a session, and `p` to pause or resume.
-- **Desktop** — the **Workflow** command opens a run picker; click nodes to inspect their sessions.
-- **RPC** — `getRun`, `getRunGraph`, `pauseRun`, `resumeRun`, `cancelRun`, and the `runUpdated` event.
+- **TUI** — `/flowgraph` opens the live graph. Use `enter` for the primary active session, `s` to pick a session, and `p` to pause, resume, or answer a human step.
+- **Desktop** — the **Workflow** command opens a run picker; click nodes to inspect their sessions, or use **Respond** for a human step.
+- **RPC** — `getRun`, `getRunGraph`, `pauseRun`, `resumeRun`, `respondRun`, `cancelRun`, and the `runUpdated` event.
 
 ## Before you start
 
@@ -136,7 +144,7 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 
 | Read this | For |
 |---|---|
-| [Workflow guide](docs/guide.md) | Agents, YAML schema, routing, outcomes, limits, examples |
+| [Workflow guide](docs/guide.md) | Agents, human steps, YAML schema, routing, outcomes, limits, examples |
 | [Operations](docs/operations.md) | Execution, recovery, storage, concurrency, permissions, guardrails |
 | [Interfaces](docs/interfaces.md) | RPC, `/flowgraph` command, TUI, Desktop GUI, Mermaid |
 | [Development](docs/development.md) | Architecture, local development, migration, releasing |

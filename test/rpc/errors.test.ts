@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ProjectBusyError } from "../../src/state/concurrency.js"
+import { InvalidHumanResponseError } from "../../src/execution/runner.js"
 import { toRpcError, type ErrorContext } from "../../src/rpc/errors.js"
 
 function recorder() {
@@ -22,6 +23,18 @@ describe("toRpcError", () => {
         type: "project_busy",
         message: "another workflow is active for this project",
         data: { message: "another workflow is active for this project" },
+      },
+    ])
+  })
+
+  it("maps an undeclared human outcome to invalid_input", () => {
+    const { context, calls } = recorder()
+    toRpcError(context, new InvalidHumanResponseError('outcome "maybe" is not declared for node "signoff"'))
+    expect(calls).toEqual([
+      {
+        type: "invalid_input",
+        message: 'outcome "maybe" is not declared for node "signoff"',
+        data: { message: 'outcome "maybe" is not declared for node "signoff"' },
       },
     ])
   })

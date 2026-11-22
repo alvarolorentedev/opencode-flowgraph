@@ -22,6 +22,7 @@ describe("flowgraph RPC contract", () => {
         "listRuns",
         "listWorkflows",
         "pauseRun",
+        "respondRun",
         "resumeRun",
         "saveWorkflow",
         "startRun",
@@ -39,6 +40,17 @@ describe("flowgraph RPC contract", () => {
       (FlowgraphRpc.methods.getRunGraph.input as unknown as z.ZodTypeAny).safeParse({ runID: "run_1" }).success,
     ).toBe(true)
     expect(schema.safeParse({ workflowID: "sample", objective: "", requestID: "r1" }).success).toBe(false)
+  })
+
+  it("validates respondRun input", () => {
+    const schema = FlowgraphRpc.methods.respondRun.input as unknown as z.ZodTypeAny
+    expect(
+      schema.safeParse({ runID: "run_1", requestID: "r1", expectedRevision: 0, outcome: "approved", feedback: "ok" }).success,
+    ).toBe(true)
+    expect(schema.safeParse({ runID: "run_1", requestID: "r1", expectedRevision: 0, outcome: "Approved" }).success).toBe(false)
+    expect(
+      schema.safeParse({ runID: "run_1", requestID: "r1", expectedRevision: 0, outcome: "approved", extra: true }).success,
+    ).toBe(false)
   })
 
   it("validates workflow input size and unknown fields", () => {

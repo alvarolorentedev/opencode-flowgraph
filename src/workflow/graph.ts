@@ -16,6 +16,7 @@ export type GraphEdge = {
 export type GraphNode = {
   id: string
   agent?: string
+  human?: true
   join?: string
   workflow?: string
   label: string
@@ -59,7 +60,13 @@ export function buildGraph(workflow: WorkflowDefinition): WorkflowGraph {
     }
     nodes[id] = {
       id,
-      ...("agent" in node ? { agent: node.agent } : "fork" in node ? { join: node.join } : { workflow: node.workflow }),
+      ...("agent" in node
+        ? { agent: node.agent }
+        : "human" in node
+          ? { human: true as const }
+          : "fork" in node
+            ? { join: node.join }
+            : { workflow: node.workflow }),
       label: node.label ?? humanizeNodeId(id),
       edges,
     }

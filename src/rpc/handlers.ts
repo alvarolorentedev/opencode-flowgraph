@@ -115,6 +115,32 @@ export function createRpcHandlers(service: WorkflowService, capabilities: Capabi
       }
     },
 
+    respondRun: async (
+      input: {
+        runID: string
+        requestID: string
+        expectedRevision: number
+        nodeID?: string
+        outcome: string
+        summary?: string
+        feedback?: string
+      },
+      context: ErrorContext,
+    ) => {
+      try {
+        return {
+          run: await service.respondRun(input.runID, input.requestID, input.expectedRevision, {
+            ...(input.nodeID === undefined ? {} : { nodeID: input.nodeID }),
+            outcome: input.outcome,
+            ...(input.summary === undefined ? {} : { summary: input.summary }),
+            ...(input.feedback === undefined ? {} : { feedback: input.feedback }),
+          }),
+        }
+      } catch (error) {
+        throw toRpcError(context, error)
+      }
+    },
+
     cancelRun: async (
       input: { runID: string; requestID: string; expectedRevision: number },
       context: ErrorContext,

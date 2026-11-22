@@ -57,9 +57,11 @@ export function buildMermaidModel(graph: WorkflowGraph): MermaidModel {
   const nodes: MermaidNode[] = orderedIds.map((nodeId) => ({
     id: mermaidIds.get(nodeId)!,
     nodeId,
-    label: graph.nodes[nodeId]!.workflow === undefined
-      ? graph.nodes[nodeId]!.label
-      : `${graph.nodes[nodeId]!.label} (${graph.nodes[nodeId]!.workflow})`,
+    label: graph.nodes[nodeId]!.workflow !== undefined
+      ? `${graph.nodes[nodeId]!.label} (${graph.nodes[nodeId]!.workflow})`
+      : graph.nodes[nodeId]!.human
+        ? `${graph.nodes[nodeId]!.label} (human)`
+        : graph.nodes[nodeId]!.label,
     terminal: false,
   }))
 

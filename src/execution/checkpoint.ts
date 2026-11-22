@@ -133,6 +133,19 @@ export function advance(run: RunRecord, now: number, admit: boolean): void {
 
     const node = definitionOf(run, branch.workflowID).nodes[branch.nodeID]
     if (!node) throw new Error(`missing node "${branch.nodeID}" in workflow snapshot`)
+    if ("human" in node) {
+      if (branch.blocker?.type !== "human_input" || branch.blocker.nodeID !== branch.nodeID) {
+        branch.blocker = {
+          type: "human_input",
+          message: `waiting for a human decision on "${node.label ?? branch.nodeID}"`,
+          since: now,
+          nodeID: branch.nodeID,
+          outcomes: Object.keys(node.routes).sort(),
+        }
+      }
+      index += 1
+      continue
+    }
     if (!admit || "agent" in node) {
       index += 1
       continue

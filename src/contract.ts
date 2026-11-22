@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { WorkflowIdSchema, WorkflowSchema } from "./workflow/schema.js"
+import { HARD_LIMITS, NodeIdSchema, OutcomeSchema, WorkflowIdSchema, WorkflowSchema } from "./workflow/schema.js"
 import type { WorkflowDefinition } from "./workflow/schema.js"
 import type { WorkflowGraph } from "./workflow/graph.js"
 import type { AgentResolution } from "./workflow/validator.js"
@@ -117,6 +117,7 @@ export const RunGraphNodeSchema = z
     nodeID: z.string().min(1).max(64),
     label: z.string().min(1).max(200),
     agent: z.string().min(1).max(128).optional(),
+    human: z.literal(true).optional(),
     workflow: WorkflowIdSchema.optional(),
     join: z.string().max(64).optional(),
     childSteps: z.array(StepSummarySchema).max(500).optional(),
@@ -151,7 +152,9 @@ export const RunGraphOutputSchema = z
     mermaid: z.string().max(1_000_000),
     mermaidNodes: z.array(z.object({ nodeID: z.string().max(64), mermaidID: z.string().max(64) }).strict()).max(200),
     activeMermaidID: z.string().max(64).nullable(),
-    controls: z.object({ canPause: z.boolean(), canResume: z.boolean(), canCancel: z.boolean() }).strict(),
+    controls: z
+      .object({ canPause: z.boolean(), canResume: z.boolean(), canRespond: z.boolean(), canCancel: z.boolean() })
+      .strict(),
     pendingPermissions: z.array(PermissionSummarySchema).max(MAX_RUN_PERMISSIONS),
     blocker: z
       .object({ type: z.string().max(80), message: z.string().max(1_000) })
@@ -198,6 +201,12 @@ export const ControlRunInputSchema = z
   .strict()
 export const ResumeRunInputSchema = ControlRunInputSchema.extend({
   confirmRetry: z.boolean().optional(),
+}).strict()
+export const RespondRunInputSchema = ControlRunInputSchema.extend({
+  nodeID: NodeIdSchema.optional(),
+  outcome: OutcomeSchema,
+  summary: z.string().min(1).max(HARD_LIMITS.maxTextResultBytes).optional(),
+  feedback: z.string().max(HARD_LIMITS.maxTextResultBytes).optional(),
 }).strict()
 export const RunControlOutputSchema = z.object({ run: RunSummarySchema }).strict()
 

@@ -64,6 +64,20 @@ export class AmbiguousResumeError extends Error {
   }
 }
 
+export class InvalidHumanResponseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "InvalidHumanResponseError"
+  }
+}
+
+export type HumanDecision = {
+  nodeID?: string | undefined
+  outcome: string
+  summary?: string | undefined
+  feedback?: string | undefined
+}
+
 export class PermissionPendingError extends Error {
   constructor(readonly permissions: PermissionSummary[]) {
     super("the active node is waiting for a native permission decision")
@@ -268,18 +282,28 @@ export class WorkflowRunner {
           const ready = run.execution!.branches.filter((branch) => !branch.active)
           if (ready.some((branch) => {
             const node = definitionOf(run, branch.workflowID).nodes[branch.nodeID]
-            return !node || !("agent" in node)
+            if (!node) return true
+            if ("agent" in node) return false
+            if ("human" in node) return branch.blocker?.type !== "human_input"
+            return true
           })) {
             run = await this.update(run, (draft) => advance(draft, this.now(), true))
           }
           const branch = run.execution!.branches.find((item) => !item.active)
-          if (branch && run.status === "running") run = await this.admit(run, branch)
+          if (branch && run.status === "running") {
+            const node = definitionOf(run, branch.workflowID).nodes[branch.nodeID]
+            if (node && "agent" in node) run = await this.admit(run, branch)
+          }
         }
         if (TERMINAL.has(run.status) || run.status === "paused") await this.release(key, owner)
         return run
       })
       if (signal.aborted || TERMINAL.has(run.status) || run.status === "paused") return
-      if (run.status === "running" && run.execution!.branches.some((branch) => !branch.active)) continue
+      if (run.status === "running" && run.execution!.branches.some((branch) => {
+        if (branch.active) return false
+        const node = definitionOf(run, branch.workflowID).nodes[branch.nodeID]
+        return node !== undefined && "agent" in node
+      })) continue
 
       let changed = false
       await Promise.all(run.execution!.branches.map(async (branch) => {
@@ -676,6 +700,11 @@ export class WorkflowRunner {
       if (permissions.length > 0) throw new PermissionPendingError(permissions)
 
       const execution = initialize(run)
+      const human = execution.branches.filter((branch) => branch.blocker?.type === "human_input")
+      const pendingWork = execution.branches.some((branch) => branch.active || branch.blocker?.type === "permission")
+      if (human.length > 0 && !pendingWork && run.status !== "paused") {
+        throw new NotResumableError("the run is waiting for a human decision; use respondRun")
+      }
       const ambiguous = execution.branches.filter((branch) => branch.active &&
         (branch.active.phase === "ambiguous" || (branch.blocker && branch.blocker.type !== "permission")))
       if (ambiguous.length > 0 && !confirmRetry) throw new AmbiguousResumeError()
@@ -712,6 +741,103 @@ export class WorkflowRunner {
         projectCheckpoint(draft, runner.now())
       })
       if (!owner.promise) runner.launch(key, owner, updated, activeSteps(updated).length > 0)
+      return updated
+    })
+  }
+
+  async respond(
+    projectID: string,
+    runID: string,
+    expectedRevision: number,
+    requestID: string,
+    decision: HumanDecision,
+  ): Promise<RunRecord> {
+    return this.control(projectID, runID, expectedRevision, requestID, async (runner, run, key, owner) => {
+      if (TERMINAL.has(run.status) || run.status === "paused" || run.status === "pausing") {
+        throw new NotResumableError(`a ${run.status} run cannot accept a human decision`)
+      }
+      if (!run.execution) throw new NotResumableError("the run has no pending nodes")
+      const waiting = run.execution.branches.filter((branch) =>
+        !branch.active && branch.blocker?.type === "human_input" && branch.blocker.nodeID === branch.nodeID)
+      const branch = decision.nodeID === undefined
+        ? waiting.length === 1 ? waiting[0] : undefined
+        : waiting.find((item) => item.nodeID === decision.nodeID)
+      if (!branch) {
+        throw new NotResumableError(decision.nodeID !== undefined
+          ? `no human step "${decision.nodeID}" is waiting for a decision`
+          : waiting.length === 0
+            ? "no human step is waiting for a decision"
+            : "multiple human steps are waiting; specify nodeID")
+      }
+      const workflow = definitionOf(run, branch.workflowID)
+      const node = workflow.nodes[branch.nodeID]
+      if (!node || !("human" in node)) throw new NotResumableError(`node "${branch.nodeID}" is not a human step`)
+      let target: string
+      try {
+        target = resolveTransition(buildGraph(workflow), branch.nodeID, decision.outcome)
+      } catch (error) {
+        throw new InvalidHumanResponseError(errorMessage(error, "invalid human outcome"))
+      }
+      if (run.stepCount >= run.maxSteps) return runner.fail(run, runner.stepLimit(run, branch.nodeID))
+
+      const stepIndex = run.execution.nextStep
+      let attempt = 1
+      while (await runner.store.getStep(run.project.id, run.runID, newStepID(stepIndex, attempt))) attempt += 1
+      const stepID = newStepID(stepIndex, attempt)
+      const at = runner.now()
+      const step: StepRecord = {
+        schemaVersion: 1,
+        runID: run.runID,
+        stepID,
+        seq: stepIndex,
+        nodeID: branch.nodeID,
+        ...(branch.calls.length > 0 && { workflowID: branch.workflowID, callPath: branch.calls.map((frame) => frame.nodeID) }),
+        agentID: "human",
+        sessionID: run.runSessionID ?? "human",
+        promptMessageID: `human:${stepID}`,
+        attempt,
+        status: "completed",
+        result: {
+          outcome: decision.outcome,
+          summary: decision.summary?.trim() || `Human selected "${decision.outcome}"`,
+          feedback: decision.feedback ?? "",
+          evidence: [],
+        },
+        audit: { toolCalls: [], mutatingToolCalls: 0 },
+        usage: zeroUsage(),
+        startedAt: at,
+        completedAt: at,
+      }
+      await runner.store.putStep(run.project.id, step)
+
+      const updated = await runner.update(run, (draft) => {
+        draft.recentControlRequests[requestID] = { operation: "respond", at: runner.now(), revision: draft.revision + 1 }
+        const current = draft.execution!.branches.find((item) => item.id === branch.id)!
+        delete current.active
+        delete current.blocker
+        delete current.permissions
+        delete current.joined
+        current.nodeID = target
+        current.previous = [...current.previous.slice(-2), stepID]
+        recordStep(draft, step)
+        draft.stepCount += 1
+        draft.execution!.nextStep += 1
+        draft.status = "running"
+        try {
+          if (trackTransition(current, step.nodeID, decision.outcome, target) > workflow.limits.max_repeat_transitions) {
+            throw new RepeatedTransitionError(step.nodeID)
+          }
+          advance(draft, runner.now(), false)
+        } catch (error) {
+          if (!(error instanceof RepeatedTransitionError)) throw error
+          draft.status = "failed"
+          draft.failure = { code: "no_progress", message: error.message, nodeID: error.nodeID, stepID }
+          draft.completedAt = runner.now()
+          projectCheckpoint(draft, runner.now())
+        }
+      })
+      if (updated.status === "failed") await runner.cleanup(updated)
+      else if (!owner.promise) runner.launch(key, owner, updated, activeSteps(updated).length > 0)
       return updated
     })
   }

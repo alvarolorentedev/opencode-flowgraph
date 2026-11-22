@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { HARD_LIMITS, NodeIdSchema, NodeResultSchema, WorkflowIdSchema, WorkflowSchema } from "../workflow/schema.js"
+import { HARD_LIMITS, NodeIdSchema, NodeResultSchema, OutcomeSchema, WorkflowIdSchema, WorkflowSchema } from "../workflow/schema.js"
 
 export const RUN_STATUSES = [
   "running",
@@ -38,11 +38,13 @@ export const BlockerSchema = z
       "missing_report",
       "host_unloaded",
       "recovery",
+      "human_input",
     ]),
     message: z.string().min(1).max(1_000),
     since: z.number().int().nonnegative(),
     nodeID: z.string().max(64).optional(),
     stepID: z.string().max(64).optional(),
+    outcomes: z.array(OutcomeSchema).max(HARD_LIMITS.maxRoutesPerNode).optional(),
   })
   .strict()
 export type Blocker = z.infer<typeof BlockerSchema>

@@ -39,6 +39,27 @@ const unsubscribe = workflows.events.on("runUpdated", (event) => {
 
 Events are live-only. After reconnecting, call `listRuns` or `getRun`.
 
+### Human steps
+
+A run waiting on a `human: true` node exposes a `human_input` blocker with its declared `outcomes`. Answer it with the current revision:
+
+```ts
+await workflows.respondRun(
+  {
+    runID,
+    requestID: crypto.randomUUID(),
+    expectedRevision,
+    nodeID: "signoff",
+    outcome: "approved",
+    summary: "Approved",
+    feedback: "Ship it",
+  },
+  { location },
+)
+```
+
+Omit `nodeID` when exactly one human step is waiting. A decision is stored as a completed step with `agentID: "human"` and counts toward `max_steps`.
+
 ### Methods
 
 | Method | Purpose |
@@ -56,6 +77,7 @@ Events are live-only. After reconnecting, call `listRuns` or `getRun`.
 | `getRunStep` | Full persisted step result |
 | `pauseRun` | Safe pause between nodes |
 | `resumeRun` | Resume, with explicit confirmation for ambiguous retries |
+| `respondRun` | Answer a waiting human step with a declared outcome and feedback |
 | `cancelRun` | Cancel future execution and interrupt active work |
 
 Event: `runUpdated` with project, run, workflow, status, current node, revision, timestamp, and blocker. Events are live-only notifications; reconnecting clients must call `getRun` or `listRuns`.
@@ -101,6 +123,8 @@ Error data contains IDs, validation diagnostics, the current revision, or redact
 - `resumeRun` requires the current `expectedRevision`.
 - `resumeRun` returns `permission_pending` while a native permission request is outstanding.
 - `resumeRun` requires `confirmRetry: true` to retry ambiguous steps. Other branches retain their checkpoints and live sessions.
+- `resumeRun` returns `not_resumable` when the only remaining work is a human step; use `respondRun`.
+- `respondRun` accepts a `nodeID` when several human steps wait, records the decision as a step, and routes like an agent outcome. An undeclared outcome returns `invalid_input`.
 - `cancelRun` marks the run cancelled and requests interruption of every outstanding session in that run.
 - An idempotent retry with the same `requestID` returns the current run.
 - `startRun` uses `requestID` plus the workflow/objective hash to detect conflicting retries.
@@ -164,8 +188,8 @@ Workflow page:
 | `o` | Open the selected run's session with its graph panel |
 | `enter` | Open the primary active session |
 | `s` | Pick any workflow session, grouped by graph node |
-| `u` | Resume or retry ambiguous steps while siblings run |
-| `p` | Pause or resume |
+| `u` | Answer a human step, resume, or retry ambiguous steps while siblings run |
+| `p` | Answer a blocked human step; otherwise pause or resume |
 | `c` | Cancel the run |
 | `r` | Refresh |
 
@@ -175,8 +199,8 @@ Session panel:
 |---|---|
 | `enter` | Open the primary active session |
 | `s` | Pick any workflow session, grouped by graph node |
-| `u` | Resume or retry ambiguous steps while siblings run |
-| `p` | Pause or resume |
+| `u` | Answer a human step, resume, or retry ambiguous steps while siblings run |
+| `p` | Answer a blocked human step; otherwise pause or resume |
 | `c` | Cancel the run |
 | `r` | Refresh |
 
@@ -201,7 +225,7 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 - Completed nodes styled green, nodes whose latest route looped back red until a later attempt passes, active nodes yellow, and failed/paused/pending nodes styled by state.
 - Run status, revision, failure reason, blocker, and pending permission count.
 - Click a node to open its native session. A node without a session shows a toast instead.
-- Buttons for changing runs, pause, resume, cancel, and graph zoom.
+- Buttons for changing runs, pause, resume, respond to a human step, cancel, and graph zoom.
 - Live updates from `runUpdated`, with polling as a fallback.
 
 ### Multiple runs

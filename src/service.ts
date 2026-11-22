@@ -17,7 +17,7 @@ import { sha256 } from "./util/hash.js"
 import { errorMessage } from "./util/redact.js"
 import { zeroUsage } from "./execution/results.js"
 import type { NativeRuntime } from "./execution/native-agents.js"
-import { RunNotFoundError, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
+import { RunNotFoundError, type HumanDecision, type RunUpdatedPayload, type WorkflowRunner } from "./execution/runner.js"
 import {
   RunRecordSchema,
   summaryOf,
@@ -464,6 +464,17 @@ export class WorkflowService {
   ): Promise<RunSummary> {
     const run = await this.requireRun(runID)
     const updated = await this.runner.resume(this.project.id, run.runID, expectedRevision, requestID, confirmRetry)
+    return summaryOf(updated)
+  }
+
+  async respondRun(
+    runID: string,
+    requestID: string,
+    expectedRevision: number,
+    decision: HumanDecision,
+  ): Promise<RunSummary> {
+    const run = await this.requireRun(runID)
+    const updated = await this.runner.respond(this.project.id, run.runID, expectedRevision, requestID, decision)
     return summaryOf(updated)
   }
 

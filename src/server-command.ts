@@ -98,6 +98,7 @@ export async function runServerCommand(
     ]
     if (graph.activeNode) lines.push(`Active node: ${graph.activeNode}`)
     if (graph.blocker) lines.push(`Blocked: ${graph.blocker.message}`)
+    if (graph.blocker?.type === "human_input") lines.push("Answer this human step with RPC respondRun.")
     if (graph.failure) lines.push(`Failed: ${graph.failure.code} — ${graph.failure.message}`)
     if (graph.pendingPermissions.length > 0) {
       lines.push(`Waiting for ${graph.pendingPermissions.length} native permission request(s)`)

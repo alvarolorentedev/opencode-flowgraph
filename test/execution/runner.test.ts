@@ -182,6 +182,89 @@ nodes:
     expect(final.status).toBe("completed")
   })
 
+  it("waits for a human decision, routes on it, and hands feedback to the next agent", async () => {
+    const workflow = `version: 1
+name: sample
+entry: developer
+limits: { max_steps: 8, timeout_seconds: 60 }
+nodes:
+  developer: { agent: developer, routes: { done: signoff } }
+  signoff:
+    human: true
+    label: Approve the release
+    routes: { approved: ship, rejected: developer }
+  ship: { agent: reviewer, next: complete }
+`
+    const { store, native, runner } = setup((input) => ({
+      report: input.agent === "developer"
+        ? { outcome: "done", summary: "implemented", feedback: "", evidence: [] }
+        : { outcome: "approved", summary: "approved", feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const waiting = await waitForRun(store, "prj_1", run.runID, (item) => item.blocker?.type === "human_input")
+    expect(waiting.status).toBe("blocked")
+    expect(waiting.activeStep).toBeNull()
+    expect(waiting.blocker).toMatchObject({ nodeID: "signoff", outcomes: ["approved", "rejected"] })
+    expect(native.prompts).toHaveLength(1)
+    await expect(runner.resume("prj_1", run.runID, waiting.revision, "resume-human", false)).rejects.toMatchObject({
+      name: "NotResumableError",
+    })
+    await expect(runner.respond("prj_1", run.runID, waiting.revision, "bad-human", { outcome: "maybe" })).rejects.toMatchObject({
+      name: "InvalidHumanResponseError",
+    })
+
+    await runner.respond("prj_1", run.runID, waiting.revision, "human-reject", {
+      outcome: "rejected",
+      feedback: "add a regression test",
+    })
+    const again = await waitForRun(store, "prj_1", run.runID, (item) =>
+      item.blocker?.type === "human_input" && item.steps.filter((step) => step.nodeID === "developer").length === 2)
+    expect(native.prompts.at(-1)?.text).toMatch(/<result node="signoff" outcome="rejected">[\s\S]*<feedback>add a regression test<\/feedback>/)
+    const humanStep = await store.getStep("prj_1", run.runID, again.steps[1]!.stepID)
+    expect(humanStep).toMatchObject({
+      agentID: "human",
+      status: "completed",
+      result: { outcome: "rejected", feedback: "add a regression test" },
+    })
+
+    await runner.respond("prj_1", run.runID, again.revision, "human-approve", { outcome: "approved" })
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.stepCount).toBe(5)
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["developer", "signoff", "developer", "signoff", "ship"])
+  })
+
+  it("keeps a human wait across restart without prompting an agent", async () => {
+    const workflow = `version: 1
+name: sample
+entry: signoff
+limits: { max_steps: 4, timeout_seconds: 60 }
+nodes:
+  signoff: { human: true, routes: { approved: ship } }
+  ship: { agent: reviewer, next: complete }
+`
+    const { store, native, runner, newRunner } = setup(() => ({
+      report: { outcome: "approved", summary: "shipped", feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const waiting = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "blocked")
+    expect(waiting.blocker?.type).toBe("human_input")
+    expect(native.prompts).toHaveLength(0)
+
+    await runner.shutdown()
+    const recovered = newRunner()
+    await recovered.recoverProject("prj_1", run.project.canonical)
+    const stillWaiting = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "blocked")
+    expect(stillWaiting.blocker?.type).toBe("human_input")
+    expect(native.prompts).toHaveLength(0)
+
+    await recovered.respond("prj_1", run.runID, stillWaiting.revision, "human-approve", { outcome: "approved" })
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["signoff", "ship"])
+    expect(native.prompts).toHaveLength(1)
+  })
+
   it("cancels an active node", async () => {
     const { store, runner } = setup(() => ({ delayMs: 10_000, report: { outcome: "done", summary: "x", feedback: "", evidence: [] } }))
     const run = await createRun(store)
@@ -375,6 +458,36 @@ describe("parallel workflow checkpoints", () => {
     expect(native.prompts.find((prompt) => prompt.nodeID === "followup")!.text).not.toContain("<summary>left</summary>")
     expect(final.stepCount).toBe(8)
     expect(new Set(final.steps.map((step) => step.stepID)).size).toBe(8)
+  })
+
+  it("holds a join until a human branch decides", async () => {
+    const workflow = `version: 1
+name: sample
+entry: dispatch
+limits: { max_steps: 8, timeout_seconds: 60 }
+nodes:
+  dispatch: { fork: [review, approve], join: merge }
+  review: { agent: reviewer, next: merge }
+  approve: { human: true, routes: { approved: merge } }
+  merge: { agent: developer, routes: { done: complete } }
+`
+    const { store, native, runner } = setup(({ nodeID }) => ({
+      report: { outcome: nodeID === "merge" ? "done" : "approved", summary: nodeID, feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store, {}, workflow)
+    await runner.start("prj_1", run.runID)
+    const waiting = await waitForRun(store, "prj_1", run.runID, (item) => item.blocker?.type === "human_input")
+    expect(waiting.blocker).toMatchObject({ nodeID: "approve", outcomes: ["approved"] })
+    expect(native.prompts.map((prompt) => prompt.nodeID)).toEqual(["review"])
+
+    await runner.respond("prj_1", run.runID, waiting.revision, "human-approve", {
+      outcome: "approved",
+      summary: "approved by human",
+    })
+    const final = await waitForRun(store, "prj_1", run.runID, (item) => item.status === "completed")
+    expect(final.stepCount).toBe(3)
+    expect(final.steps.map((step) => step.nodeID)).toEqual(["review", "approve", "merge"])
+    expect(native.prompts.at(-1)?.text).toMatch(/<summary>review<\/summary>[\s\S]*<summary>approved by human<\/summary>/)
   })
 
   it("restores a partial join after restart without admitting completed steps again", async () => {

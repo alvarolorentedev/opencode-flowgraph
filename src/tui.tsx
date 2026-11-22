@@ -278,7 +278,8 @@ function WorkflowGraph(props: {
     const current = graph()
     const source = props.source()
     if (!current || !source) return
-    const confirm = current.blockers?.some((blocker) => blocker.type !== "permission") ?? current.status === "blocked"
+    const confirm = current.blockers?.some((blocker) =>
+      blocker.type !== "permission" && blocker.type !== "human_input") ?? current.status === "blocked"
     if (confirm) {
       const ok = await context.ui.dialog.confirm({
         title: "Retry ambiguous workflow steps?",
@@ -294,6 +295,59 @@ function WorkflowGraph(props: {
       )
     } catch (cause) {
       context.ui.toast.show({ message: errorDetail(cause, "Resume failed"), variant: "error" })
+    }
+  }
+
+  const respond = async () => {
+    const current = graph()
+    const source = props.source()
+    if (!current || !source) return
+    const blockers = (current.blockers ?? [])
+      .filter((blocker) => blocker.type === "human_input" && blocker.nodeID !== undefined)
+    if (blockers.length === 0) return
+    let blocker = blockers[0]!
+    if (blockers.length > 1) {
+      const nodeID = await context.ui.dialog.select<string>({
+        title: "Human steps",
+        options: blockers.map((item) => ({
+          title: item.nodeID!,
+          description: item.message,
+          value: item.nodeID!,
+        })),
+      })
+      if (!nodeID) return
+      blocker = blockers.find((item) => item.nodeID === nodeID)!
+    }
+    const outcomes = blocker.outcomes ?? []
+    if (outcomes.length === 0) {
+      context.ui.toast.show({ message: `No outcomes declared for ${blocker.nodeID}`, variant: "warning" })
+      return
+    }
+    const outcome = outcomes.length === 1
+      ? outcomes[0]!
+      : await context.ui.dialog.select<string>({
+          title: `Decide ${blocker.nodeID}`,
+          options: outcomes.map((value) => ({ title: value, value })),
+        })
+    if (!outcome) return
+    const feedback = await context.ui.dialog.prompt({
+      title: "Feedback for the next node (optional)",
+      placeholder: "What should the next node know?",
+    })
+    try {
+      await source.rpc.respondRun(
+        {
+          runID: current.runID,
+          requestID: requestID(),
+          expectedRevision: current.revision,
+          nodeID: blocker.nodeID!,
+          outcome,
+          ...(feedback?.trim() ? { feedback: feedback.trim() } : {}),
+        },
+        { location: { directory: source.directory } },
+      )
+    } catch (cause) {
+      context.ui.toast.show({ message: errorDetail(cause, "Human decision failed"), variant: "error" })
     }
   }
 
@@ -339,12 +393,13 @@ function WorkflowGraph(props: {
       },
       {
         id: `flowgraph.${props.id}.toggle`,
-        title: "Pause or resume workflow",
+        title: "Pause, resume, or answer a human step",
         bind: "p",
         run: () => {
           const current = graph()
           if (!current) return
-          if (current.status === "paused" || current.status === "blocked") void resume()
+          if (current.status === "blocked" && current.controls.canRespond) void respond()
+          else if (current.status === "paused" || current.status === "blocked") void resume()
           else void pause()
         },
       },
@@ -356,9 +411,13 @@ function WorkflowGraph(props: {
       },
       {
         id: `flowgraph.${props.id}.resume`,
-        title: "Resume workflow or retry ambiguous steps",
+        title: "Resume, retry, or answer a human step",
         bind: "u",
-        run: () => { if (graph()?.controls.canResume) void resume() },
+        run: () => {
+          const current = graph()
+          if (current?.controls.canRespond) void respond()
+          else if (current?.controls.canResume) void resume()
+        },
       },
       {
         id: `flowgraph.${props.id}.cancel`,
@@ -419,7 +478,7 @@ function WorkflowGraph(props: {
         return (
           <box flexDirection="column">
             <text fg={color(node)}>
-              {nodeMarker(node)} {node.label} {node.agent ? `(${node.agent})` : node.workflow ? `(${node.workflow})` : `(join at ${node.join})`} · {node.stepCount} step(s)
+              {nodeMarker(node)} {node.label} {node.agent ? `(${node.agent})` : node.workflow ? `(${node.workflow})` : node.human ? "(human)" : `(join at ${node.join})`} · {node.stepCount} step(s)
               {node.sessionIDs.length > 0 ? ` · ${node.sessionIDs.length} session(s)` : ""}
             </text>
             {edges.map((edge) => (

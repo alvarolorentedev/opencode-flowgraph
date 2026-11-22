@@ -11,9 +11,14 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
   )
   const active = activeSteps(run)
   const blockers = blockersOf(run)
+  const humanWaiting = blockers.filter((blocker) => blocker.type === "human_input" && blocker.nodeID !== undefined)
   const activity = new Set(active.filter((step) => step.phase !== "ambiguous").map(displayNode))
   const ambiguous = new Set(active.filter((step) => step.phase === "ambiguous").map(displayNode))
-  const activeNode = active[0] ? displayNode(active[0]) : (run.status === "running" || run.status === "pausing" ? run.currentNode : null)
+  const activeNode = active[0]
+    ? displayNode(active[0])
+    : run.status === "running" || run.status === "pausing" || (run.status === "blocked" && humanWaiting.length > 0)
+      ? run.currentNode
+      : null
   if (active.length === 0 && activeNode) activity.add(activeNode)
   const paused = new Set(run.status !== "paused" ? [] : run.execution
     ? run.execution.branches.map((branch) => branch.calls[0]?.nodeID ?? branch.nodeID)
@@ -63,6 +68,7 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
       nodeID: node.id,
       label: node.label,
       ...(node.agent === undefined ? {} : { agent: node.agent }),
+      ...(node.human === undefined ? {} : { human: true }),
       ...(node.workflow === undefined ? {} : { workflow: node.workflow }),
       ...(node.join === undefined ? {} : { join: node.join }),
       ...(node.workflow && { childSteps: entries }),
@@ -97,9 +103,12 @@ export function buildRunGraph(run: RunRecord, pendingPermissions: PermissionSumm
       canPause: run.status === "running" || run.status === "pausing",
       canResume: pendingPermissions.length === 0 && (
         (run.status === "paused" && run.pause?.reason !== "route") ||
-        run.status === "blocked" ||
-        (run.status === "running" && blockers.some((blocker) => blocker.type !== "permission"))
+        (humanWaiting.length === 0 && (
+          run.status === "blocked" ||
+          (run.status === "running" && blockers.some((blocker) => blocker.type !== "permission"))
+        ))
       ),
+      canRespond: humanWaiting.length > 0 && run.status !== "paused" && run.status !== "pausing",
       canCancel: !terminal,
     },
     pendingPermissions,

@@ -59,7 +59,7 @@ describe("buildRunGraph", () => {
     })
     expect(graph.activeMermaidID).toBe(graph.mermaidNodes.find((node) => node.nodeID === "reviewer")?.mermaidID)
     expect(graph.edges.some((edge) => edge.from === "reviewer" && edge.to === "complete" && edge.terminal)).toBe(true)
-    expect(graph.controls).toEqual({ canPause: true, canResume: false, canCancel: true })
+    expect(graph.controls).toEqual({ canPause: true, canResume: false, canRespond: false, canCancel: true })
   })
 
   it("marks a paused next node", () => {
@@ -200,6 +200,42 @@ describe("buildRunGraph", () => {
     expect(graph.nodes.find((node) => node.nodeID === "reviewer")?.state).toBe("failed")
     expect(graph.failure).toMatchObject({ code: "native_failure", message: "failed", nodeID: "reviewer" })
     expect(graph.controls.canCancel).toBe(false)
+  })
+
+  it("marks a waiting human step and exposes its decision controls", () => {
+    const workflow = parseWorkflowSource(
+      `version: 1
+name: approval
+entry: developer
+limits: { max_steps: 6 }
+nodes:
+  developer: { agent: developer, next: signoff }
+  signoff:
+    human: true
+    routes: { approved: complete, rejected: developer }
+`,
+      { workflowID: "approval" },
+    ).workflow!
+    const graph = buildRunGraph(
+      makeRunRecord({
+        workflowID: "approval",
+        workflowSnapshot: workflow,
+        status: "blocked",
+        currentNode: "signoff",
+        nextNode: "signoff",
+        blocker: {
+          type: "human_input",
+          message: "waiting for a human decision on signoff",
+          since: 1,
+          nodeID: "signoff",
+          outcomes: ["approved", "rejected"],
+        },
+      }),
+    )
+    expect(RunGraphOutputSchema.safeParse(graph).success).toBe(true)
+    expect(graph.activeNode).toBe("signoff")
+    expect(graph.nodes.find((node) => node.nodeID === "signoff")).toMatchObject({ human: true, state: "active" })
+    expect(graph.controls).toMatchObject({ canResume: false, canRespond: true })
   })
 
   it("returns only JSON values for parallel runs and running steps", () => {

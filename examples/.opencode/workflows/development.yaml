@@ -27,6 +27,13 @@ nodes:
   security:
     agent: security
     routes:
-      approved: complete
+      approved: signoff
       changes_requested: developer
       blocked: pause
+
+  signoff:
+    human: true
+    label: Approve the release
+    routes:
+      approved: complete
+      rejected: developer

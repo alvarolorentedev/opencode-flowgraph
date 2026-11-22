@@ -241,7 +241,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   const resume = async () => {
     const value = graph()
     if (!value) return
-    const confirm = value.blockers?.some((blocker) => blocker.type !== "permission") ?? value.status === "blocked"
+    const confirm = value.blockers?.some((blocker) =>
+      blocker.type !== "permission" && blocker.type !== "human_input") ?? value.status === "blocked"
     if (confirm) {
       const ok = await ctx.dialogs.confirm({
         title: "Retry ambiguous workflow steps?",
@@ -258,6 +259,58 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
       )
     } catch (cause) {
       ctx.toast.show({ title: "Workflow", description: errorDetail(cause, "Resume failed"), variant: "error" })
+    }
+  }
+
+  const respond = async () => {
+    const value = graph()
+    if (!value) return
+    const blockers = (value.blockers ?? [])
+      .filter((blocker) => blocker.type === "human_input" && blocker.nodeID !== undefined)
+    if (blockers.length === 0) return
+    let blocker = blockers[0]!
+    if (blockers.length > 1) {
+      const nodeID = await ctx.dialogs.select<string>({
+        title: "Human steps",
+        options: blockers.map((item) => ({
+          title: item.nodeID!,
+          description: item.message,
+          value: item.nodeID!,
+        })),
+      })
+      if (!nodeID) return
+      blocker = blockers.find((item) => item.nodeID === nodeID)!
+    }
+    const outcomes = blocker.outcomes ?? []
+    if (outcomes.length === 0) {
+      ctx.toast.show({ title: "Workflow", description: `No outcomes declared for ${blocker.nodeID}`, variant: "error" })
+      return
+    }
+    const outcome = outcomes.length === 1
+      ? outcomes[0]!
+      : await ctx.dialogs.select<string>({
+          title: `Decide ${blocker.nodeID}`,
+          options: outcomes.map((value) => ({ title: value, value })),
+        })
+    if (!outcome) return
+    const feedback = await ctx.dialogs.prompt({
+      title: "Feedback for the next node (optional)",
+      placeholder: "What should the next node know?",
+    })
+    try {
+      await rpc().respondRun(
+        {
+          runID: value.runID,
+          requestID: requestID(),
+          expectedRevision: value.revision,
+          nodeID: blocker.nodeID!,
+          outcome,
+          ...(feedback?.trim() ? { feedback: feedback.trim() } : {}),
+        },
+        { location: location() },
+      )
+    } catch (cause) {
+      ctx.toast.show({ title: "Workflow", description: errorDetail(cause, "Human decision failed"), variant: "error" })
     }
   }
 
@@ -333,6 +386,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                 <button onClick={openActive} disabled={!activeSession()}>Open active session</button>
                 <button onClick={pause} disabled={!value.controls.canPause}>Pause</button>
                 <button onClick={resume} disabled={!value.controls.canResume}>Resume</button>
+                <button onClick={respond} disabled={!value.controls.canRespond}>Respond</button>
                 <button onClick={cancel} disabled={!value.controls.canCancel}>Cancel</button>
                 <span class="awf-zoom">
                   <button onClick={() => setZoom((current) => Math.max(50, current - 10))} title="Zoom out">−</button>
