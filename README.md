@@ -151,6 +151,7 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 | [Interfaces](docs/interfaces.md) | RPC, `/flowgraph` command, TUI, Desktop GUI, Mermaid |
 | [Architecture](docs/architecture.md) | Core/adapter boundary, runtime contract, storage, recovery, security |
 | [Adapters](docs/adapters.md) | Implementing a harness adapter, result transports, compatibility notes |
+| [Roadmap](docs/roadmap.md) | Planned harness verification, contract parity, and second-harness gates |
 | [Development](docs/development.md) | Module map, local development, migration, releasing |
 
 ## License

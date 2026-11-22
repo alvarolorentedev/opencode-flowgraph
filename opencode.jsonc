@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.10.0"],
+  "commands": {
+    "release": {
+      "template": "Increase the package version, run bun run check and bun run build:gui, commit, create and push the v<version> tag, and follow the release workflow until completion. If it fails, fix forward with a new version; never move or delete a tag.",
+      "description": "release a new version"
+    },
+    "commit": {
+      "template": "Review the current changes and commit only work belonging to this task. Follow the repository conventions in README.md and docs/development.md. Never include unrelated changes or overwrite concurrent work. Commit with a Conventional Commit message and push directly to main without force. Verify GitHub CI and fix regressions with new commits. Stop and report any conflict or blocker.",
+      "description": "Safely commit and push completed work to main"
+    }
+  }
+}
