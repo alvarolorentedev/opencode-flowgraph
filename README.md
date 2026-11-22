@@ -50,7 +50,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["@alvarolorentedev/opencode-flowgraph@0.10.0"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@1.0.0"]
 }
 ```
 
