@@ -82,7 +82,8 @@ export class OpenCodeAdapter implements HarnessAdapter {
       permissions: { survivesRestart: false, approval: "native" },
       security: {
         nativePermissions: true,
-        protectedPaths: "tool_hook",
+        // Known file tools are intercepted; shell commands are inspected heuristically, not sandboxed.
+        protectedPaths: "best_effort",
         // The tool hook only rejects background work unless the option opts out.
         backgroundWork: ctx.options.allowBackgroundWork === true ? "unobservable" : "blocked",
       },

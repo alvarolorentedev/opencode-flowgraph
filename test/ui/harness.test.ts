@@ -11,9 +11,13 @@ import {
   harnessId,
   harnessLines,
   harnessWarnings,
+  graphControlTitle,
   legacyReadOnlyPanelLine,
   legacyReadOnlyTitle,
   legacyReadOnlyToast,
+  readOnlyGraph,
+  readOnlyNoHostToast,
+  readOnlyRun,
   runPickerSuffix,
   runSuffix,
   type HarnessCapabilityState,
@@ -27,9 +31,15 @@ const opencode: HarnessCapabilities = {
   sessions: { runScope: true, adoptLegacyRuns: true },
   results: { mechanism: "native_tool", corrections: true },
   permissions: { survivesRestart: true, approval: "native" },
-  security: { nativePermissions: true, protectedPaths: "tool_hook", backgroundWork: "blocked" },
+  security: { nativePermissions: true, protectedPaths: "best_effort", backgroundWork: "blocked" },
   usage: { tokens: true, cost: true },
   audit: true,
+}
+
+const toolHook: HarnessCapabilities = {
+  ...opencode,
+  id: "tool-hook",
+  security: { ...opencode.security, protectedPaths: "tool_hook" },
 }
 
 const unobservable: HarnessCapabilities = {
@@ -48,7 +58,7 @@ describe("harness capability presentation", () => {
     expect(harnessLines({ status: "error" })).toEqual(["Active harness capabilities unavailable."])
     expect(harnessLines({ status: "ready", capabilities: opencode })).toEqual([
       "Active harness: opencode 2.2.5",
-      "Results native_tool · Permissions native · Paths tool_hook · Background blocked",
+      "Results native_tool · Permissions native · Paths best_effort · Background blocked",
     ])
     expect(harnessLines({ status: "ready", capabilities: unobservable })).toEqual([
       "Active harness: a-very-long-fore…",
@@ -61,14 +71,40 @@ describe("harness capability presentation", () => {
     expect(lines[0]).toBe("Active harness: a-very-long-fore…")
   })
 
-  it("warns only for unenforced security claims", () => {
-    expect(harnessWarnings({ status: "ready", capabilities: opencode })).toEqual([])
+  it("warns only for security claims that are not a full guarantee", () => {
+    expect(harnessWarnings({ status: "ready", capabilities: opencode })).toEqual([
+      "Warning: protected paths are best-effort; shell checks are heuristic.",
+      "Native permissions remain the security boundary.",
+    ])
+    expect(harnessWarnings({ status: "ready", capabilities: toolHook })).toEqual([])
     expect(harnessWarnings({ status: "loading" })).toEqual([])
     expect(harnessWarnings({ status: "error" })).toEqual([])
     expect(harnessWarnings({ status: "ready", capabilities: unobservable })).toEqual([
       "Warning: background work can outlive this step (unobservable).",
       "Warning: protected paths are not intercepted (none).",
     ])
+    const noNative = {
+      ...opencode,
+      security: { ...opencode.security, nativePermissions: false },
+    }
+    expect(harnessWarnings({ status: "ready", capabilities: noNative })).toContain(
+      "No native permission boundary is available.",
+    )
+  })
+
+  it("locks only foreign and unadopted legacy graphs", () => {
+    expect(readOnlyGraph({})).toBe(false)
+    expect(readOnlyGraph({ readOnly: true })).toBe(true)
+    expect(readOnlyGraph({ harness: { id: "other" } })).toBe(true)
+    expect(readOnlyRun({})).toBe(false)
+    expect(readOnlyRun({ readOnly: true })).toBe(true)
+    expect(readOnlyRun({ harness: { id: "other" } })).toBe(true)
+    expect(graphControlTitle({ harness: { id: "other" } })).toBe("Unavailable for other runs")
+    expect(graphControlTitle({ readOnly: true })).toBe("Read-only run")
+    expect(graphControlTitle({})).toBeUndefined()
+    expect(readOnlyNoHostToast).toBe(
+      "Open a session first: the read-only graph opens in that session's Workflow panel.",
+    )
   })
 
   it("truncates a displayed harness id to 16 characters", () => {
@@ -90,7 +126,8 @@ describe("harness capability presentation", () => {
     )
     expect(foreignSessionToast(id)).toBe(`Sessions for the ${shown} harness open in its own client.`)
     expect(foreignGuiLine(id)).toBe(
-      `Read-only: this run belongs to the ${shown} harness. Controls are unavailable in this client.`,
+      `Read-only: this run belongs to the ${shown} harness. ` +
+        "Native sessions and controls are unavailable in this client.",
     )
     expect(foreignControlTitle(id)).toBe(`Unavailable for ${shown} runs`)
     expect(runSuffix({ harness: { id } })).toBe(` · [${shown}]`)

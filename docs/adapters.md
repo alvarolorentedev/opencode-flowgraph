@@ -80,12 +80,12 @@ Adapters must be safe for concurrent calls on different sessions. The engine obs
 | `permissions.survivesRestart` | Pending requests remain queryable after a process restart. |
 | `permissions.approval` | `native` UI, `host` callback, or `none`. |
 | `security.nativePermissions` | The harness enforces its own permission model. |
-| `security.protectedPaths` | `tool_hook`, `approval_hook`, or `none`. |
+| `security.protectedPaths` | `tool_hook`, `approval_hook`, `best_effort`, or `none`. |
 | `security.backgroundWork` | `blocked` or `unobservable`. |
 | `usage.tokens` / `usage.cost` | What the adapter can actually report. |
 | `audit` | The adapter can produce tool-call audit entries. |
 
-Do not set `protectedPaths: "tool_hook"` unless every file-write and shell tool is intercepted. Do not set `backgroundWork: "blocked"` unless background work is actually rejected.
+Do not set `protectedPaths: "tool_hook"` unless every file-write and shell tool is intercepted. Use `"best_effort"` when known file tools are blocked and shell protection is heuristic; it warns users that the check is not a sandbox. The OpenCode adapter reports `"best_effort"`. Do not set `backgroundWork: "blocked"` unless background work is actually rejected.
 
 ## Structured results
 
@@ -234,8 +234,11 @@ The suite runs these scenarios on the adapter's capability variants:
 Capability honesty is part of the suite. A fixture supplies a
 `capabilityProbe` that returns one finding per security claim it cannot
 demonstrate. The suite fails if a claim such as `backgroundWork: "blocked"` or
-`protectedPaths: "tool_hook"` has no probe, and
+`protectedPaths: "tool_hook"`/`"best_effort"` has no probe, and
 `test/contract/harness-contract.test.ts` proves a deliberate lie is reported.
+The real OpenCode adapter's values are asserted in
+`test/adapters/opencode/runtime.test.ts`, and its enforcement paths in
+`test/execution/tool-hooks.test.ts`.
 
 `test/fixtures/fake-harness.ts` shows a configurable adapter. The OpenCode RPC
 re-export is not part of the suite. `test/architecture/core-is-harness-agnostic.test.ts`

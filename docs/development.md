@@ -62,7 +62,7 @@ The optional real OpenCode plugin-loading/RPC smoke test:
 OPENCODE_SMOKE=1 OPENCODE_BIN=/path/to/opencode bun run test:smoke
 ```
 
-It starts an isolated `opencode api --standalone` request, loads the plugin from this repository, and calls `capabilities` and `listWorkflows`. It also starts `opencode serve` and covers a no-model human-only lifecycle: start, human decision, a second approval through to `completed`, pause, resume, and a separate run that is cancelled at its blocker. It does not make model calls.
+It starts an isolated `opencode serve`, loads the plugin from this repository, and calls `capabilities`, `listWorkflows`, and the workflow CRUD methods. It also covers a no-model human-only lifecycle: start, human decision, a second approval through to `completed`, pause, resume, and a separate run that is cancelled at its blocker. It does not make model calls.
 
 The opt-in model-routing integration uses a local OpenAI-compatible mock server and makes no paid model calls:
 
@@ -72,7 +72,9 @@ OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=/path/to/opencode bun run test:integra
 
 It checks the model IDs and variant sent in actual inference requests, and restarts `opencode serve` mid-agent-step twice: with a persisted `flowgraph_report`, recovery reconciles the report and completes the run; without a report, recovery blocks or fails conservatively. Neither path re-sends the prompt. The mock provider cannot deterministically produce an unknown prompt admission or an unknown permission state, so those recovery cases are covered only by the `FakeHarness` contract suite. The default unit suite still uses `FakeHarness` and does not require an OpenCode binary.
 
-**Verification record (2026-11-22):** `bun run check` → 201 passed, 5 skipped (2 test files: the OpenCode smoke and model-integration suites); `bun run build:gui` → pass. With `@opencode/cli` 2.2.5 on `PATH`, `OPENCODE_SMOKE=1 OPENCODE_BIN=... bun run test:smoke` → 2 passed and `OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=... bun run test:integration` → 3 passed, including both restart cases and the reported `harnessCapabilities` values. The manual real-model E2E run and the manual TUI/Desktop check remain outstanding. Durable-report reconciliation after restart is also covered at the core level by `test/execution/runner.test.ts` ("recovers a node that completed before the run checkpoint").
+**Verification record (2026-11-22):** `bun run check` → 208 passed, 5 skipped (2 test files: the OpenCode smoke and model-integration suites); `bun run build:gui` → pass. With `@opencode/cli` 2.2.5 on `PATH`, `OPENCODE_SMOKE=1 OPENCODE_BIN=... bun run test:smoke` → 2 passed and `OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=... bun run test:integration` → 3 passed, including both restart cases and the asserted real-adapter `harnessCapabilities` (`id`, `backgroundWork`, `protectedPaths=best_effort`). The manual real-model E2E run and the manual TUI/Desktop check remain outstanding. Durable-report reconciliation after restart is also covered at the core level by `test/execution/runner.test.ts` ("recovers a node that completed before the run checkpoint").
+
+**OpenCode 2.3.2 gate:** `@opencode/cli` 2.3.2 now loads plugins lazily, so the request that triggers loading can lose the race and return either `rpc.unavailable` or a `503` with `{"code":"service_starting"}`; a retry within the 20-second deadline succeeds. Both opt-in suites retry both transient responses and ignore OpenCode's parent-session subagent-completion turn. Where native agents must be registered, they wait for workflow validity first: the smoke suite waits for `sample` before asserting it, and all three model-suite `startRun` calls wait for their workflow. The smoke lifecycle is human-only, so its runs need no agent wait. With those readiness waits, `OPENCODE_SMOKE=1 ...` → 2 passed and `OPENCODE_MODEL_INTEGRATION=1 ...` → 3 passed on 2.3.2. The waits do not skip or weaken assertions.
 
 The adapter contract suite is reusable. `test/contract/harness-suite.ts` exports `describeHarnessContract`; a new adapter supplies a fixture factory and runs it without touching the core tests. `test/contract/harness-contract.test.ts` runs it on two `FakeHarness` capability variants, including a parentless-session variant, and includes capability-honesty and unknown-terminal recovery checks.
 
@@ -112,6 +114,12 @@ Update the plugin entry in `opencode.json(c)` and any agent prompts that call th
 ## Releasing
 
 Releases are published to the public npm registry from GitHub Actions using npm Trusted Publishing (OIDC). There is no long-lived npm token in the repository.
+
+`1.0.1` is the next patch. It carries the post-`v1.0.0` harness ownership,
+capability-honesty, and Desktop read-only fixes. Do not move the `v1.0.0` tag or
+republish `1.0.0`: bump, commit, tag `v1.0.1`, and let the release workflow
+publish. Code may be committed and reviewed before the tag; tagging and
+publishing remain separate gates.
 
 ### Prerequisites
 

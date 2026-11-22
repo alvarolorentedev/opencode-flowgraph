@@ -16,7 +16,7 @@ type ModelRequest = {
   model?: string
   temperature?: number
   stream?: boolean
-  messages?: Array<{ role?: string }>
+  messages?: Array<{ role?: string; content?: string }>
   tools?: Array<{ name?: string; function?: { name?: string } }>
 }
 
@@ -51,7 +51,9 @@ async function body(request: IncomingMessage): Promise<ModelRequest> {
 function respond(request: ModelRequest, response: ServerResponse, modelRequests: ModelRequest[]) {
   const reportTool = request.tools?.find((tool) => (tool.function?.name ?? tool.name) === "flowgraph_report")
   const hasToolResult = request.messages?.some((message) => message.role === "tool") ?? false
-  if (reportTool && !hasToolResult) modelRequests.push(request)
+  // OpenCode 2.3+ also prompts the parent run-scope session when a child completes.
+  const notification = request.messages?.at(-1)?.content?.startsWith("<subagent ") ?? false
+  if (reportTool && !hasToolResult && !notification) modelRequests.push(request)
 
   response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
   const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
@@ -65,7 +67,7 @@ function respond(request: ModelRequest, response: ServerResponse, modelRequests:
       })}\n\n`,
     )
 
-  if (reportTool && !hasToolResult) {
+  if (reportTool && !hasToolResult && !notification) {
     const name = reportTool.function?.name ?? reportTool.name!
     chunk({
       role: "assistant",
@@ -87,14 +89,41 @@ function respond(request: ModelRequest, response: ServerResponse, modelRequests:
 }
 
 async function route(server: string, method: string, input: Record<string, unknown>, authorization: string) {
-  const response = await fetch(`${server}/api/rpc/flowgraph/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization },
-    body: JSON.stringify({ input }),
-  })
-  const result = (await response.json()) as { output?: Record<string, unknown>; message?: string }
-  if (!response.ok || !result.output) throw new Error(`${method} failed (${response.status}): ${JSON.stringify(result)}`)
-  return result.output
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const response = await fetch(`${server}/api/rpc/flowgraph/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization },
+      body: JSON.stringify({ input }),
+    })
+    const result = (await response.json()) as {
+      output?: Record<string, unknown>
+      type?: string
+      message?: string
+      code?: string
+    }
+    if (response.ok && result.output) return result.output
+    // OpenCode 2.3+ loads plugins lazily, so the request that triggers loading can lose the race.
+    const transient =
+      result.type === "rpc.unavailable" || result.code === "service_starting" || response.status === 503
+    if (!transient || Date.now() > deadline) {
+      throw new Error(`${method} failed (${response.status}): ${JSON.stringify(result)}`)
+    }
+    await wait(250)
+  }
+}
+
+async function waitForWorkflow(server: string, authorization: string, workflowID: string): Promise<void> {
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const result = await route(server, "listWorkflows", {}, authorization)
+    const workflows = result.workflows as Array<{ id: string; valid: boolean }>
+    if (workflows.find((workflow) => workflow.id === workflowID)?.valid) return
+    if (Date.now() > deadline) {
+      throw new Error(`workflow ${workflowID} did not become valid: ${JSON.stringify(result)}`)
+    }
+    await wait(250)
+  }
 }
 
 async function serve(project: string, home: string) {
@@ -284,6 +313,7 @@ nodes:
       }
       if (!ready) throw new Error(`OpenCode did not become ready: ${logs}`)
 
+      await waitForWorkflow(baseURL, authorization, "models")
       const started = await route(baseURL, "startRun", {
         workflowID: "models",
         objective: "verify model routing",
@@ -340,6 +370,7 @@ nodes:
 
     let server = await serve(project, home)
     try {
+      await waitForWorkflow(server.baseURL, server.authorization, "once")
       const started = await route(server.baseURL, "startRun", {
         workflowID: "once",
         objective: "verify restart recovery",
@@ -385,6 +416,8 @@ nodes:
       expect(step.sessionID).toBe(before.currentStep!.sessionID)
       const harness = await route(server.baseURL, "harnessCapabilities", {}, server.authorization)
       expect(harness.id).toBe("opencode")
+      // Capability honesty end-to-end: the real adapter must not claim full tool-level interception.
+      expect((harness.security as { protectedPaths: string }).protectedPaths).toBe("best_effort")
     } finally {
       await server.stop().catch(() => undefined)
       mockProvider.closeAllConnections()
@@ -432,6 +465,7 @@ nodes:
       // The reported capability follows the plugin option end to end.
       expect(harness.security.backgroundWork).toBe("unobservable")
 
+      await waitForWorkflow(server.baseURL, server.authorization, "once")
       const started = await route(server.baseURL, "startRun", {
         workflowID: "once",
         objective: "verify durable report recovery",

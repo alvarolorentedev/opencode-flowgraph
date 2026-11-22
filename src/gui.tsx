@@ -13,37 +13,43 @@ import mermaid from "mermaid"
 import { FlowgraphRpc } from "./rpc.js"
 import type { RunGraphOutput } from "./contract.js"
 import { parseWorkflowCommand } from "./command.js"
-import { listLocatedRuns, waitForRunSession, type LocatedRun } from "./ui/runs.js"
+import {
+  emptyRunPickerMessage,
+  listLocatedRuns,
+  runPickerTitle,
+  waitForRunSession,
+  type LocatedRun,
+} from "./ui/runs.js"
 import { errorDetail } from "./util/redact.js"
 import { withTimeout } from "./util/timeout.js"
 import {
-  foreignControlTitle,
+  graphControlTitle,
   foreignGuiLine,
   harnessLines,
   harnessWarnings,
   legacyReadOnlyPanelLine,
-  legacyReadOnlyToast,
-  legacyReadOnlyTitle,
+  readOnlyGraph,
+  readOnlyNoHostToast,
+  readOnlyRun,
   runPickerSuffix,
   type HarnessCapabilityState,
 } from "./ui/harness.js"
 
 const TAB_ID = "graph"
 
-function locked(value: RunGraphOutput): boolean {
-  return value.harness !== undefined || value.readOnly === true
-}
-
-function controlTitle(value: RunGraphOutput): string | undefined {
-  if (value.harness !== undefined) return foreignControlTitle(value.harness.id)
-  return value.readOnly === true ? legacyReadOnlyTitle : undefined
+type ReadOnlyTarget = {
+  /** Host session key (`server\nsession`): the panel that carries the read-only graph. */
+  key: string
+  directory: string
+  runID: string
 }
 
 const css = `
 .awf-graph { display:flex; flex-direction:column; gap:10px; height:100%; min-height:0; padding:12px; font-size:12px; }
 .awf-graph-header { display:flex; flex-direction:column; gap:2px; }
 .awf-graph-title { font-weight:600; }
-.awf-graph-muted { opacity:.65; }
+.awf-graph-muted { opacity:.65; overflow-wrap:anywhere; }
+.awf-graph-run { opacity:.65; overflow-wrap:anywhere; }
 .awf-graph-warn { color:#c47c00; }
 .awf-graph-error { color:#c43d3d; }
 .awf-graph-actions { display:flex; flex-wrap:wrap; gap:6px; }
@@ -93,7 +99,11 @@ function nodeSession(graph: RunGraphOutput, nodeID: string): string | undefined 
   return graph.nodes.find((node) => node.nodeID === nodeID)?.sessionIDs.at(-1)
 }
 
-function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => void }) {
+function WorkflowGraphPanel(props: {
+  session: MountedSession
+  target?: ReadOnlyTarget
+  onPickRun: () => void
+}) {
   const ctx = usePlugin()
   const [graph, setGraph] = createSignal<RunGraphOutput>()
   const [error, setError] = createSignal<string>()
@@ -103,9 +113,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   let container: HTMLDivElement | undefined
   let renderSequence = 0
 
-  const location = () => ({ directory: props.session.directory })
+  const location = () => ({ directory: props.target?.directory ?? props.session.directory })
   const rpc = () => props.session.server.client.rpc(FlowgraphRpc)
-  const foreign = () => graph()?.harness
 
   const load = async (runID: string): Promise<boolean> => {
     try {
@@ -157,8 +166,15 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
         else if (node?.state === "completed") {
           element.classList.add(node.routedBack ? "wf-rejected" : "wf-completed")
         } else if (node?.state === "failed") element.classList.add("wf-failed")
+        const locked = readOnlyGraph(value)
+        const state = `${node?.label ?? mermaidID}: ${node?.state ?? "unknown"}${locked ? ", read-only" : ""}`
+        element.setAttribute("aria-label", state)
+        element.setAttribute("title", state)
+        if (locked) {
+          element.removeAttribute("tabindex")
+          continue
+        }
         const sessionID = nodeSession(value, mermaidID)
-        if (locked(value)) continue
         if (sessionID) element.classList.add("wf-clickable")
         element.addEventListener("click", () => {
           const session = nodeSession(value, mermaidID)
@@ -215,11 +231,13 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
         if (current === generation) setHarness({ status: "error" })
       })
     try {
-      const runID = await withTimeout(
-        resolveRun(),
-        10_000,
-        "Workflow RPC timed out while resolving the run; is the plugin loaded on this server?",
-      )
+      const runID =
+        props.target?.runID ??
+        (await withTimeout(
+          resolveRun(),
+          10_000,
+          "Workflow RPC timed out while resolving the run; is the plugin loaded on this server?",
+        ))
       if (current !== generation) return
       if (!runID) {
         setError("This session is not a workflow run. Use Runs to choose one.")
@@ -239,7 +257,12 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
     }
   }
 
-  createEffect(on(() => props.session.id, () => void start()))
+  createEffect(
+    on(
+      () => [props.session.id, props.target?.key, props.target?.directory, props.target?.runID] as const,
+      () => void start(),
+    ),
+  )
   onCleanup(() => {
     generation += 1
     unsubscribe?.()
@@ -252,16 +275,16 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const openActive = () => {
-    if (foreign()) return
+    const value = graph()
+    if (!value || readOnlyGraph(value)) return
     const sessionID = activeSession()
     if (!sessionID) return
     ctx.tabs.open({ server: props.session.server.id, id: sessionID }, { focus: true })
   }
 
   const pause = async () => {
-    if (foreign()) return
     const value = graph()
-    if (!value) return
+    if (!value || readOnlyGraph(value)) return
     try {
       await rpc().pauseRun(
         { runID: value.runID, requestID: requestID(), expectedRevision: value.revision },
@@ -273,9 +296,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const resume = async () => {
-    if (foreign()) return
     const value = graph()
-    if (!value) return
+    if (!value || readOnlyGraph(value)) return
     const confirm = value.blockers?.some((blocker) =>
       blocker.type !== "permission" && blocker.type !== "human_input") ?? value.status === "blocked"
     if (confirm) {
@@ -298,9 +320,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const respond = async () => {
-    if (foreign()) return
     const value = graph()
-    if (!value) return
+    if (!value || readOnlyGraph(value)) return
     const blockers = (value.blockers ?? [])
       .filter((blocker) => blocker.type === "human_input" && blocker.nodeID !== undefined)
     if (blockers.length === 0) return
@@ -351,9 +372,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
   }
 
   const cancel = async () => {
-    if (foreign()) return
     const value = graph()
-    if (!value) return
+    if (!value || readOnlyGraph(value)) return
     const ok = await ctx.dialogs.confirm({
       title: "Cancel workflow run?",
       description: "Active sessions will receive an interrupt request.",
@@ -395,11 +415,11 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
             <>
               <div class="awf-graph-header">
                 <div class="awf-graph-title">
-                  Workflow {value.workflowID} · {value.status} · {value.nodes.filter((node) => node.state === "completed").length}/
+                  Inspecting {value.workflowID} · {value.status} · {value.nodes.filter((node) => node.state === "completed").length}/
                   {value.nodes.length} nodes
                 </div>
-                <div class="awf-graph-muted">
-                  Run {value.runID} · revision {value.revision}
+                <div class="awf-graph-run">
+                  Run {value.runID} · {location().directory} · revision {value.revision}
                 </div>
                 {harnessLines(harness()).map((line) => (
                   <div class="awf-graph-muted">{line}</div>
@@ -433,36 +453,36 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                 <button onClick={props.onPickRun}>Runs</button>
                 <button
                   onClick={openActive}
-                  disabled={!activeSession() || locked(value)}
-                  title={controlTitle(value)}
+                  disabled={!activeSession() || readOnlyGraph(value)}
+                  title={graphControlTitle(value)}
                 >
                   Open active session
                 </button>
                 <button
                   onClick={pause}
-                  disabled={!value.controls.canPause || locked(value)}
-                  title={controlTitle(value)}
+                  disabled={!value.controls.canPause || readOnlyGraph(value)}
+                  title={graphControlTitle(value)}
                 >
                   Pause
                 </button>
                 <button
                   onClick={resume}
-                  disabled={!value.controls.canResume || locked(value)}
-                  title={controlTitle(value)}
+                  disabled={!value.controls.canResume || readOnlyGraph(value)}
+                  title={graphControlTitle(value)}
                 >
                   Resume
                 </button>
                 <button
                   onClick={respond}
-                  disabled={!value.controls.canRespond || locked(value)}
-                  title={controlTitle(value)}
+                  disabled={!value.controls.canRespond || readOnlyGraph(value)}
+                  title={graphControlTitle(value)}
                 >
                   Respond
                 </button>
                 <button
                   onClick={cancel}
-                  disabled={!value.controls.canCancel || locked(value)}
-                  title={controlTitle(value)}
+                  disabled={!value.controls.canCancel || readOnlyGraph(value)}
+                  title={graphControlTitle(value)}
                 >
                   Cancel
                 </button>
@@ -481,8 +501,8 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                     {node.childSteps!.map((step) => (
                       <button
                         onClick={() => ctx.tabs.open({ server: props.session.server.id, id: step.sessionID }, { focus: true })}
-                        disabled={locked(value)}
-                        title={controlTitle(value)}
+                        disabled={readOnlyGraph(value)}
+                        title={graphControlTitle(value)}
                       >
                         {step.callPath?.slice(1).concat(step.nodeID).join(" / ") ?? step.nodeID} · step {step.seq} · {step.status}
                       </button>
@@ -490,7 +510,7 @@ function WorkflowGraphPanel(props: { session: MountedSession; onPickRun: () => v
                   </div>
                 </details>
               ))}
-              {locked(value)
+              {readOnlyGraph(value)
                 ? null
                 : <div class="awf-graph-muted">Click a node to open its native session.</div>}
             </>
@@ -512,6 +532,7 @@ export default Plugin.define({
   setup(ctx) {
     const panelKey = `${ctx.id}:${TAB_ID}`
     const [pendingRunSession, setPendingRunSession] = createSignal<{ server: string; sessionID: string }>()
+    const [readOnlyTarget, setReadOnlyTarget] = createSignal<ReadOnlyTarget>()
 
     const toast = (description: string, variant: "default" | "success" | "error" = "default") =>
       ctx.toast.show({ title: "Workflow", description, variant })
@@ -524,6 +545,7 @@ export default Plugin.define({
     }
 
     const openRun = (server: string, runSessionID: string) => {
+      setReadOnlyTarget(undefined)
       setPendingRunSession({ server, sessionID: runSessionID })
       ctx.tabs.open({ server, id: runSessionID }, { focus: true })
     }
@@ -550,11 +572,11 @@ export default Plugin.define({
       try {
         const result = await listLocatedRuns({ client: server.client, rpc, currentDirectory: directory })
         if (result.runs.length === 0) {
-          toast("No workflow runs visible for this server.")
+          toast(emptyRunPickerMessage(result.unavailable.length))
           return
         }
         const selected = await ctx.dialogs.select<LocatedRun>({
-          title: "Open workflow run",
+          title: runPickerTitle(result.unavailable.length),
           placeholder: "Search runs",
           options: result.runs.map((item) => ({
             title: `${item.run.workflowID} · ${item.run.status}${runPickerSuffix(item.run)}`,
@@ -563,14 +585,21 @@ export default Plugin.define({
           })),
         })
         if (!selected) return
-        if (selected.run.harness) {
-          toast(foreignGuiLine(selected.run.harness.id))
+        if (readOnlyRun(selected.run)) {
+          const host = ctx.sessions.current()
+          if (!host) {
+            toast(readOnlyNoHostToast)
+            return
+          }
+          setReadOnlyTarget({
+            key: host.key,
+            directory: selected.directory,
+            runID: selected.run.runID,
+          })
+          ctx.layout.open(panelKey, host, { tab: "open" })
           return
         }
-        if (selected.run.readOnly) {
-          toast(legacyReadOnlyToast)
-          return
-        }
+        setReadOnlyTarget(undefined)
         const runSessionID =
           selected.run.runSessionID ??
           (await waitForRunSession(rpc, selected.directory, selected.run.runID))
@@ -599,8 +628,10 @@ export default Plugin.define({
         } catch {
           // Not a workflow session; offer the run picker.
         }
-        if (runID) ctx.layout.open(panelKey, session, { tab: "select" })
-        else void pickRun()
+        if (runID) {
+          setReadOnlyTarget(undefined)
+          ctx.layout.open(panelKey, session, { tab: "select" })
+        } else void pickRun()
       })()
     }
 
@@ -728,7 +759,16 @@ export default Plugin.define({
       region: "side",
       mobile: { title: "Workflow", order: 50, kind: "menu" },
       list: (input) => (input.open.includes(TAB_ID) ? [graphTab] : []),
-      render: (props) => <WorkflowGraphPanel session={props.session} onPickRun={() => void pickRun()} />,
+      render: (props) => {
+        const target = () => {
+          const value = readOnlyTarget()
+          return value?.key === props.session.key ? value : undefined
+        }
+        return <WorkflowGraphPanel session={props.session} target={target()} onPickRun={() => void pickRun()} />
+      },
+      close: (props) => {
+        if (readOnlyTarget()?.key === props.session.key) setReadOnlyTarget(undefined)
+      },
     })
   },
 })

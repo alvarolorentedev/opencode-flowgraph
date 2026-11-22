@@ -73,7 +73,7 @@ export const HarnessCapabilitiesSchema = z
     security: z
       .object({
         nativePermissions: z.boolean(),
-        protectedPaths: z.enum(["tool_hook", "approval_hook", "none"]),
+        protectedPaths: z.enum(["tool_hook", "approval_hook", "best_effort", "none"]),
         backgroundWork: z.enum(["blocked", "unobservable"]),
       })
       .strict(),

@@ -108,8 +108,8 @@ export async function registerToolHooks(
       const protectedPath = shellViolation(root, event.input, protectedPaths)
       if (protectedPath) {
         throw new Error(
-          `workflow nodes cannot run a destructive shell command against protected configuration path "${protectedPath}". ` +
-            `Make the change in a normal session.`,
+          `workflow nodes cannot run a shell command that may modify protected configuration path "${protectedPath}" ` +
+            `(heuristic check). Make the change in a normal session.`,
         )
       }
     }

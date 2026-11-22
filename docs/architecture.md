@@ -155,8 +155,9 @@ Portable guarantees stay in the core: graph-controlled routing, outcome validati
 
 Protected configuration paths and background-work blocking are adapter-enforced. The adapter must report the truth:
 
-- `protectedPaths: "tool_hook"` — full tool-level interception (OpenCode, Claude `PreToolUse`).
+- `protectedPaths: "tool_hook"` — every file-write and shell tool is intercepted at one guaranteed point (for example, Claude `PreToolUse`).
 - `"approval_hook"` — only approval-time denial (Codex, ACP depending on the agent).
+- `"best_effort"` — known file-edit tools are intercepted directly and shell commands are inspected heuristically. Useful protection, not a sandbox or a guarantee against scripts, interpreters, symlinks, or unclassified tools. OpenCode reports this value.
 - `"none"` — no enforcement.
 
 `backgroundWork: "blocked"` means the adapter actually rejects background work. `"unobservable"` means it may outlive the node; the host must not claim otherwise.

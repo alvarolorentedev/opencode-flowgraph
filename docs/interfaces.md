@@ -190,8 +190,14 @@ Starting a workflow asks for a missing workflow ID or objective with a dialog, t
   then its result mechanism, approval surface, protected-path level, and
   background-work behavior. While loading it shows `Active harness: loading…`;
   a missing or failed method shows `Active harness capabilities unavailable.`
-  without blocking runs. Warnings appear when background work is unobservable or
-  protected paths are not intercepted.
+  without blocking runs. Warnings appear when background work is unobservable,
+  protected paths are not intercepted, or protected paths are only
+  `best_effort` (shell inspection is heuristic; native permissions remain the
+  boundary). `best_effort` is an additive capability value: the published 1.0.0
+  client has no capability display and ignores it. A plugin-running TUI whose
+  version differs from the server's shows its version-mismatch restart message
+  instead of loading a graph (see [Loading](#loading)); some Desktop versions
+  render the capability lines only as text.
 - Workflow and run identity for the selected run.
 - Status, revision, step count, blocker, and pending native permissions.
 - A boxed top-down diagram: nodes are boxes, branches sit side by side, cycles route around a left-hand rail, long jumps around a right-hand rail, and rail edges enter boxes from the side.
@@ -265,19 +271,26 @@ The package ships an experimental OpenCode Desktop GUI part, `./gui-experimental
 - Live updates from `runUpdated`, with polling as a fallback.
 
 A foreign-harness run adds a read-only line to the header; its picker title
-appends ` · <id>`, and selecting it explains that it is read-only in this client.
-A run without a harness identity is labeled ` · read-only` and gets the same
-read-only explanation. Open active session, Pause, Resume, Respond, Cancel, and
-child session buttons are disabled with the reason `Unavailable for <id> runs`
-(or `Read-only run` without an identity). Node clicks and the run picker do not
-open a foreign native session. Runs and Zoom remain enabled. OpenCode-owned runs
-render as before.
+appends ` · <id>`. Selecting it opens its graph read-only in the current
+session's Workflow panel, loaded by that run's directory and ID. A run without a
+harness identity is labeled ` · read-only` and opens the same way. The header
+shows the run ID, full directory, revision, and ownership line; Open active
+session, Pause, Resume, Respond, Cancel, and child session buttons are disabled
+with the reason `Unavailable for <id> runs` (or `Read-only run` without an
+identity). Node clicks and the run picker do not open a foreign native session,
+and a foreign/legacy run never triggers a native session lookup or waits for a
+run session. Runs and Zoom remain enabled. Desktop cannot open a panel without a
+session, so selecting a read-only run with no session open shows
+`Open a session first: the read-only graph opens in that session's Workflow panel.`
+The target clears when the panel closes or an owned run is selected; it is not
+persisted. Owned runs keep their existing session-opening flow; the graph title
+reads `Inspecting <workflow>` and the metadata line adds the run directory.
 
 ### Multiple runs
 
 Each workflow run has its own root session. Opening a run opens that session's tab and adds a graph panel to it, so several runs can stay open as separate graph tabs.
 
-The **Workflow** command opens a run picker containing every run on the current server, across projects and worktrees. The **Runs** button in the graph panel reopens it. An unrelated session never silently shows another run's graph.
+The **Workflow** command opens a run picker containing every run on the current server, across projects and worktrees. The **Runs** button in the graph panel reopens it. An unrelated session never silently shows another run's graph; a foreign run appears only when explicitly opened into that session's Workflow panel. If some project or worktree locations cannot be listed, the picker title appends ` · N location(s) unavailable`, and an empty picker says `No workflow runs visible; N location(s) unavailable.` instead of claiming there are no runs.
 
 Runs are stored in the plugin storage of the server that started them. Desktop loads GUI parts from its own background server, so the TUI and Desktop must use the same server to see the same runs.
 

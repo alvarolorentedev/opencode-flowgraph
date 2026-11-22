@@ -50,7 +50,7 @@ Pin a version when reproducibility matters:
 
 ```jsonc
 {
-  "plugins": ["@alvarolorentedev/opencode-flowgraph@1.0.0"]
+  "plugins": ["@alvarolorentedev/opencode-flowgraph@1.0.1"]
 }
 ```
 
@@ -115,7 +115,7 @@ In the TUI:
 /flowgraph run development "Add retry handling to the API client"
 ```
 
-Or open the palette and choose **Flowgraph** to browse runs and workflows. In OpenCode Desktop, use the **Flowgraph** command to pick a run; the experimental GUI panel renders its graph.
+Or open the palette and choose **Flowgraph** to browse runs and workflows. In OpenCode Desktop, use the **Workflow** command to pick a run; the experimental GUI panel renders its graph. A run owned by another harness, or an unadopted legacy run, opens read-only in the current session's Workflow panel.
 
 ### 5. Watch and steer
 
@@ -124,8 +124,10 @@ Or open the palette and choose **Flowgraph** to browse runs and workflows. In Op
 - **RPC** — `harnessCapabilities`, `getRun`, `getRunGraph`, `pauseRun`, `resumeRun`, `respondRun`, `cancelRun`, and the `runUpdated` event.
 
 The TUI and Desktop show the active harness, its capability summary, and any
-honest security warning. A run owned by another harness is labeled and
-read-only in this client.
+honest security warning. OpenCode reports protected paths as `best_effort`:
+known file tools are intercepted and shell commands are inspected
+heuristically, while native permissions remain the security boundary. A run
+owned by another harness is labeled and read-only in this client.
 
 ## Before you start
 

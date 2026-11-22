@@ -69,6 +69,12 @@ describe("OpenCodeAdapter", () => {
     ).toBe("unobservable")
   })
 
+  it("reports protected paths as best-effort, not a full interception guarantee", () => {
+    const capabilities = new OpenCodeAdapter(context()).capabilities
+    expect(capabilities.security.protectedPaths).toBe("best_effort")
+    expect(capabilities.security.nativePermissions).toBe(true)
+  })
+
   it("maps native agents to selectable descriptors", async () => {
     const adapter = new OpenCodeAdapter(context({ defaultModel: { providerID: "test", id: "model" } }))
     const agents = await adapter.listAgents()

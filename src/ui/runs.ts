@@ -91,6 +91,16 @@ export async function listLocatedRuns(input: {
   return { runs, locations, unavailable }
 }
 
+export function runPickerTitle(unavailable: number): string {
+  return unavailable > 0 ? `Open workflow run · ${unavailable} location(s) unavailable` : "Open workflow run"
+}
+
+export function emptyRunPickerMessage(unavailable: number): string {
+  return unavailable > 0
+    ? `No workflow runs visible; ${unavailable} location(s) unavailable.`
+    : "No workflow runs visible for this server."
+}
+
 export async function waitForRunSession(
   rpc: FlowgraphRpcClient,
   directory: string,

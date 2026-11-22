@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { RunSummarySchema, type RunSummary } from "../../src/state/types.js"
-import { compareLocatedRuns, discoverLocations, listLocatedRuns, waitForRunSession } from "../../src/ui/runs.js"
+import {
+  compareLocatedRuns,
+  discoverLocations,
+  emptyRunPickerMessage,
+  listLocatedRuns,
+  runPickerTitle,
+  waitForRunSession,
+} from "../../src/ui/runs.js"
 import { zeroUsage } from "../../src/execution/results.js"
 
 function summary(overrides: Partial<RunSummary> = {}): RunSummary {
@@ -96,6 +103,13 @@ describe("workflow run discovery", () => {
       "newer",
       "done",
     ])
+  })
+
+  it("names unavailable locations in the picker title and empty message", () => {
+    expect(runPickerTitle(0)).toBe("Open workflow run")
+    expect(runPickerTitle(2)).toBe("Open workflow run · 2 location(s) unavailable")
+    expect(emptyRunPickerMessage(0)).toBe("No workflow runs visible for this server.")
+    expect(emptyRunPickerMessage(1)).toBe("No workflow runs visible; 1 location(s) unavailable.")
   })
 
   it("returns the run session when it appears", async () => {

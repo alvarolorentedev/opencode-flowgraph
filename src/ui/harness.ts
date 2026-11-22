@@ -30,8 +30,34 @@ export function harnessWarnings(state: HarnessCapabilityState): string[] {
     ...(security.protectedPaths === "none"
       ? ["Warning: protected paths are not intercepted (none)."]
       : []),
+    ...(security.protectedPaths === "best_effort"
+      ? [
+          "Warning: protected paths are best-effort; shell checks are heuristic.",
+          security.nativePermissions
+            ? "Native permissions remain the security boundary."
+            : "No native permission boundary is available.",
+        ]
+      : []),
   ]
 }
+
+/** A graph is read-only when a foreign harness owns it or the active adapter cannot adopt it. */
+export function readOnlyGraph(value: { harness?: { id: string }; readOnly?: true }): boolean {
+  return value.harness !== undefined || value.readOnly === true
+}
+
+export function graphControlTitle(value: { harness?: { id: string }; readOnly?: true }): string | undefined {
+  if (value.harness !== undefined) return foreignControlTitle(value.harness.id)
+  return value.readOnly === true ? legacyReadOnlyTitle : undefined
+}
+
+/** Picker selection: owned runs follow their native session; foreign and legacy runs open read-only. */
+export function readOnlyRun(run: { harness?: { id: string }; readOnly?: true }): boolean {
+  return run.harness !== undefined || run.readOnly === true
+}
+
+export const readOnlyNoHostToast =
+  "Open a session first: the read-only graph opens in that session's Workflow panel."
 
 export function foreignRunSuffix(harness: { id: string } | undefined): string {
   return harness === undefined ? "" : ` · [${harnessId(harness.id)}]`
@@ -73,7 +99,10 @@ export function foreignSessionToast(id: string): string {
 }
 
 export function foreignGuiLine(id: string): string {
-  return `Read-only: this run belongs to the ${harnessId(id)} harness. Controls are unavailable in this client.`
+  return (
+    `Read-only: this run belongs to the ${harnessId(id)} harness. ` +
+    "Native sessions and controls are unavailable in this client."
+  )
 }
 
 export function foreignControlTitle(id: string): string {

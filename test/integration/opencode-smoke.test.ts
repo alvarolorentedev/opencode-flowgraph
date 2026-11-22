@@ -1,24 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { execFile, spawn } from "node:child_process"
+import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { promises as fs } from "node:fs"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
-import { promisify } from "node:util"
 
-const run = promisify(execFile)
 const enabled = process.env.OPENCODE_SMOKE === "1"
 const bin = process.env.OPENCODE_BIN ?? "opencode"
 const repo = process.cwd()
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-async function api(cwd: string, method: "get" | "post", route: string, data?: string): Promise<unknown> {
-  const args = ["api", "--standalone", method, route]
-  if (data !== undefined) args.push("--data", data)
-  const { stdout } = await run(bin, args, { cwd, timeout: 120_000, maxBuffer: 2 * 1024 * 1024 })
-  return JSON.parse(stdout)
-}
 
 async function freePort(): Promise<number> {
   const server = net.createServer()
@@ -82,19 +73,48 @@ async function serve(directory: string, home: string): Promise<Server> {
 }
 
 async function route(server: Server, method: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const response = await fetch(`${server.baseURL}/api/rpc/flowgraph/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: server.authorization },
-    body: JSON.stringify({ input }),
-  })
-  const result = (await response.json()) as { output?: Record<string, unknown>; message?: string }
-  if (!response.ok || !result.output) throw new Error(`${method} failed (${response.status}): ${JSON.stringify(result)}`)
-  return result.output
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const response = await fetch(`${server.baseURL}/api/rpc/flowgraph/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: server.authorization },
+      body: JSON.stringify({ input }),
+    })
+    const result = (await response.json()) as {
+      output?: Record<string, unknown>
+      type?: string
+      message?: string
+      code?: string
+    }
+    if (response.ok && result.output) return result.output
+    // OpenCode 2.3+ loads plugins lazily, so the request that triggers loading can lose the race.
+    const transient =
+      result.type === "rpc.unavailable" || result.code === "service_starting" || response.status === 503
+    if (!transient || Date.now() > deadline) {
+      throw new Error(`${method} failed (${response.status}): ${JSON.stringify(result)}`)
+    }
+    await wait(250)
+  }
+}
+
+async function waitForWorkflow(server: Server, workflowID: string): Promise<void> {
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    const result = await route(server, "listWorkflows", {})
+    const workflows = result.workflows as Array<{ id: string; valid: boolean }>
+    if (workflows.find((workflow) => workflow.id === workflowID)?.valid) return
+    if (Date.now() > deadline) {
+      throw new Error(`workflow ${workflowID} did not become valid: ${JSON.stringify(result)}`)
+    }
+    await wait(250)
+  }
 }
 
 describe.skipIf(!enabled)("OpenCode V2 plugin loading and RPC smoke test", () => {
   it("loads the plugin and serves typed RPC without model calls", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "awf-opencode-smoke-"))
+    const home = path.join(dir, "home")
+    await fs.mkdir(home, { recursive: true })
     try {
       await fs.mkdir(path.join(dir, ".opencode", "agents"), { recursive: true })
       await fs.mkdir(path.join(dir, ".opencode", "workflows"), { recursive: true })
@@ -134,57 +154,54 @@ nodes:
 `,
       )
 
-      const capabilities = (await api(dir, "post", "/api/rpc/flowgraph/capabilities", '{"input":{}}')) as {
-        output: { rpc: { id: string }; features: { structuredResults: string; parallelBranches: boolean; nestedWorkflows: boolean } }
-      }
-      expect(capabilities.output.rpc.id).toBe("flowgraph")
-      expect(capabilities.output.features).toMatchObject({
-        structuredResults: "tool", parallelBranches: true, nestedWorkflows: true,
-      })
+      const server = await serve(dir, home)
+      try {
+        const capabilities = (await route(server, "capabilities", {})) as {
+          rpc: { id: string }
+          features: { structuredResults: string; parallelBranches: boolean; nestedWorkflows: boolean }
+        }
+        expect(capabilities.rpc.id).toBe("flowgraph")
+        expect(capabilities.features).toMatchObject({
+          structuredResults: "tool", parallelBranches: true, nestedWorkflows: true,
+        })
 
-      const workflows = (await api(dir, "post", "/api/rpc/flowgraph/listWorkflows", '{"input":{}}')) as {
-        output: { workflows: Array<{ id: string; valid: boolean }> }
-      }
-      expect(workflows.output.workflows.find((workflow) => workflow.id === "sample")?.valid).toBe(true)
+        await waitForWorkflow(server, "sample")
+        const workflows = (await route(server, "listWorkflows", {})) as {
+          workflows: Array<{ id: string; valid: boolean }>
+        }
+        expect(workflows.workflows.find((workflow) => workflow.id === "sample")?.valid).toBe(true)
 
-      const workflow = (await api(
-        dir,
-        "post",
-        "/api/rpc/flowgraph/getWorkflow",
-        JSON.stringify({ input: { workflowID: "sample" } }),
-      )) as { output: { valid: boolean; mermaid: string; definition?: { name: string } } }
-      expect(workflow.output.valid).toBe(true)
-      expect(workflow.output.mermaid).toContain("flowchart TD")
-      expect(workflow.output.mermaid).toContain("Check (checks)")
-      expect(workflow.output.definition?.name).toBe("sample")
+        const workflow = (await route(server, "getWorkflow", { workflowID: "sample" })) as {
+          valid: boolean
+          mermaid: string
+          definition?: { name: string }
+        }
+        expect(workflow.valid).toBe(true)
+        expect(workflow.mermaid).toContain("flowchart TD")
+        expect(workflow.mermaid).toContain("Check (checks)")
+        expect(workflow.definition?.name).toBe("sample")
 
-      const saved = (await api(
-        dir,
-        "post",
-        "/api/rpc/flowgraph/saveWorkflow",
-        JSON.stringify({
-          input: {
-            workflowID: "saved",
-            yaml: `version: 1
+        const saved = (await route(server, "saveWorkflow", {
+          workflowID: "saved",
+          yaml: `version: 1
 name: saved
 entry: developer
 limits: { max_steps: 2 }
 nodes:
   developer: { agent: developer, next: complete }
 `,
-            expectedHash: null,
-          },
-        }),
-      )) as { output: { hash: string } }
-      expect(saved.output.hash).toHaveLength(64)
+          expectedHash: null,
+        })) as { hash: string }
+        expect(saved.hash).toHaveLength(64)
 
-      const deleted = (await api(
-        dir,
-        "post",
-        "/api/rpc/flowgraph/deleteWorkflow",
-        JSON.stringify({ input: { workflowID: "saved", expectedHash: saved.output.hash } }),
-      )) as { output: { deleted: boolean } }
-      expect(deleted.output.deleted).toBe(true)
+        const deleted = (await route(server, "deleteWorkflow", {
+          workflowID: "saved",
+          expectedHash: saved.hash,
+        })) as { deleted: boolean }
+        expect(deleted.deleted).toBe(true)
+      } finally {
+        await server.stop()
+      }
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }
@@ -240,13 +257,15 @@ nodes:
       const harness = (await route(server, "harnessCapabilities", {})) as {
         id: string
         version: string
-        security: { backgroundWork: string }
+        security: { backgroundWork: string; protectedPaths: string }
         permissions: { survivesRestart: boolean }
       }
       expect(harness.id).toBe("opencode")
       expect(typeof harness.version).toBe("string")
       // Defaults reject background work; the unobservable claim needs the opt-out.
       expect(harness.security.backgroundWork).toBe("blocked")
+      // Capability honesty end-to-end: the real adapter must not claim full tool-level interception.
+      expect(harness.security.protectedPaths).toBe("best_effort")
       expect(harness.permissions.survivesRestart).toBe(false)
 
       const started = await route(server, "startRun", {

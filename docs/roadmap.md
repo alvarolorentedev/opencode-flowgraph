@@ -10,9 +10,9 @@ old keys.
 
 | Milestone | Status |
 |---|---|
-| M0 — Verify OpenCode | Automated lifecycle/restart tests are implemented and pass against a real OpenCode binary (`v2.2.5`, `@opencode/cli` 2.2.5). The manual real-model E2E record is **pending**. |
+| M0 — Verify OpenCode | Automated lifecycle/restart tests are implemented and pass against real OpenCode binaries (`v2.2.5` and `v2.3.2`). The manual real-model E2E record is **pending**. |
 | M1 — Contract suite, transports, recovery parity | **Implemented and tested.** `describeHarnessContract` runs every documented scenario on two capability variants, a deliberate capability lie fails, `NodeResultJsonSchema` is generated from `NodeResultSchema`, synthesized report refs are canonical, and the recovery matrix matches the tests. |
-| M2 — Capability exposure and harness-aware views | **Implemented and tested at the RPC/service/presentation level.** `harnessCapabilities`, foreign-run identity, ownership-aware controls, read-only TUI/GUI/server rendering, and fixtures are covered by tests. The manual TUI/GUI check remains pending (the verification environment has no interactive TUI/Desktop session) and real foreign-harness visuals stay fixture-only until an M4 adapter exists. |
+| M2 — Capability exposure and harness-aware views | **Implemented and tested at the RPC/service/presentation level.** `harnessCapabilities`, foreign-run identity, ownership-aware controls, read-only TUI/GUI/server rendering, Desktop read-only foreign and legacy graph navigation, and fixtures are covered by tests. The manual TUI/GUI check remains pending (the verification environment has no interactive TUI/Desktop session) and real foreign-harness visuals stay fixture-only until an M4 adapter exists. |
 | M3/M4/M5 | **Not implemented.** Future milestones; no second adapter exists. |
 
 "Implemented and tested" means the default `bun run check` suite exercises the
@@ -56,9 +56,14 @@ Known gaps this plan closes:
 Open gaps:
 
 - The manual real-model E2E record is outstanding. Real-binary smoke and
-  model-integration runs pass against OpenCode `v2.2.5`.
-- The M2 manual TUI/GUI check is outstanding; foreign visuals are fixture-only
-  until M4.
+  model-integration runs pass against OpenCode `v2.2.5` and `v2.3.2`.
+- OpenCode `2.3.2` loads plugins lazily; the opt-in suites wait for the
+  transient `rpc.unavailable`, and the smoke `sample` check and all three model
+  `startRun` calls wait for workflow validity (native agents) first.
+  These are readiness waits, not skipped assertions.
+- The M2 manual TUI/GUI check is outstanding; Desktop read-only foreign and
+  legacy navigation is covered by pure selection tests, and foreign visuals
+  remain fixture-only until M4.
 - Approval is native OpenCode only; there is no host approval surface.
 - Packaging has not been tested without OpenCode peers installed.
 
@@ -81,13 +86,14 @@ host or user is confirmed after M2, stop there.
 Prove the reference adapter on a real binary before changing how other hosts see
 it.
 
-**Status:** verified against OpenCode `v2.2.5` (`@opencode/cli` 2.2.5). The
-no-model lifecycle test is `test/integration/opencode-smoke.test.ts`; the
+**Status:** verified against OpenCode `v2.2.5` and `v2.3.2`. The no-model
+lifecycle test is `test/integration/opencode-smoke.test.ts`; the
 restart-during-agent-step tests are in `test/integration/opencode-model.test.ts`
 (persisted-report completion and no-report conservative blocking). Both skip
 unless their environment flag and `OPENCODE_BIN` are present. With a real binary
 and a mock model provider they pass, including the capability values reported by
-`harnessCapabilities`. Unknown prompt admission and pending or unknown permission
+`harnessCapabilities`; the suites wait for the lazy plugin load and workflow
+validity introduced in `v2.3.2`. Unknown prompt admission and pending or unknown permission
 states cannot be produced deterministically by the mock provider; those recovery
 cases are covered at the `FakeHarness` contract level instead. The manual
 real-model E2E record is still pending.
@@ -111,9 +117,10 @@ real-model E2E record is still pending.
 
 - `OPENCODE_SMOKE=1 OPENCODE_BIN=... bun run test:smoke` passes and covers the
   human-only start → respond → completed path, pause/resume, and cancel. Passes
-  against OpenCode `v2.2.5`.
+  against OpenCode `v2.2.5` and `v2.3.2`.
 - `OPENCODE_MODEL_INTEGRATION=1 OPENCODE_BIN=... bun run test:integration`
-  passes and includes the restart assertion. Passes against OpenCode `v2.2.5`.
+  passes and includes the restart assertion. Passes against OpenCode `v2.2.5`
+  and `v2.3.2`.
 - The manual E2E record is attached to the release or issue that claims
   verification.
 - `bun run check` is green.
@@ -161,7 +168,9 @@ generated schema and synthesized report reference are exported from the core.
 - Add capability-honesty cases: a variant that claims
   `security.backgroundWork: "blocked"` must actually reject background work; one
   that claims `security.protectedPaths: "tool_hook"` must actually intercept
-  every file-write and shell path. A claim without behavior fails the suite.
+  every file-write and shell path, and `"best_effort"` must not claim more than
+  known file tools plus heuristic shell inspection. A claim without behavior
+  fails the suite.
 - Keep the suite free of `@opencode/*` imports so a future adapter can run it.
 - Derive the structured-output JSON Schema from `NodeResultSchema` with Zod 4
   `z.toJSONSchema`; no second hand-written definition and no new dependency.
@@ -213,9 +222,11 @@ No second adapter, no RPC field, no UI change, no free-text result parsing.
 Expose what the active adapter can do, and stop advertising control over runs
 that belong to another harness. This is the only milestone with a UX contract.
 
-**Status:** implemented and tested at the RPC, service, server-command, and pure
-presentation level. The manual TUI/GUI check on a real OpenCode run remains
-pending; foreign visuals are verified by fixture only until M4.
+**Status:** implemented and tested at the RPC, service, server-command, GUI
+selection, and pure presentation level. Desktop opens foreign and unadopted
+legacy runs read-only from the existing picker, without a native session lookup.
+The manual TUI/GUI check on a real OpenCode run remains pending; foreign visuals
+are verified by fixture only until M4.
 
 ### RPC and service
 
@@ -255,6 +266,9 @@ Warnings, exact copy:
 
 - `Warning: background work can outlive this step (unobservable).`
 - `Warning: protected paths are not intercepted (none).`
+- `Warning: protected paths are best-effort; shell checks are heuristic.`
+  followed by `Native permissions remain the security boundary.` (or
+  `No native permission boundary is available.`).
 
 Foreign runs:
 
@@ -266,8 +280,10 @@ Foreign runs:
 - Control toast: `This run belongs to the <id> harness. Pause, resume, respond, and cancel are unavailable in this client.`
 - Session toast: `Sessions for the <id> harness open in its own client.`
 - GUI picker title appends ` · <id>` (or ` · read-only` when no identity is
-  known); selecting it shows the read-only line. If a foreign graph is rendered,
-  the header adds `Read-only: this run belongs to the <id> harness. Controls are unavailable in this client.`
+  known); selecting it opens the graph read-only in the current session's
+  Workflow panel, bound to that run's directory and ID. The header adds
+  `Read-only: this run belongs to the <id> harness. Native sessions and controls are unavailable in this client.`
+  The target clears on close or an owned selection and is never persisted.
 - GUI Pause, Resume, Respond, Cancel, Open active session, and node-session
   buttons get `disabled` and `title="Unavailable for <id> runs"`. Runs and Zoom
   stay enabled.
@@ -315,7 +331,8 @@ Accessibility and layout:
   permissions for foreign runs).
 - A pure presentation helper used by the TUI and GUI, unit-tested in
   `test/ui/` with an OpenCode plus foreign fixture (node-only; the repo has no
-  DOM renderer).
+  DOM renderer). `test/ui/harness.test.ts` also covers read-only run/graph
+  selection and the no-host Desktop copy.
 - `test/server-command.test.ts` (foreign text and unchanged OpenCode text).
 - Manual TUI/GUI check on a real OpenCode run: capability lines render, no badge
   on OpenCode runs, controls unchanged.
