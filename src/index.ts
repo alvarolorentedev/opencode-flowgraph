@@ -2,18 +2,13 @@ import { Plugin } from "@opencode/plugin"
 import type { CapabilitiesOutput } from "./contract.js"
 import { FlowgraphRpc } from "./rpc.js"
 import { createRpcHandlers } from "./adapters/opencode/rpc/handlers.js"
-import { WorkflowService } from "./service.js"
-import { WorkflowRepository } from "./workflow/loader.js"
 import { HARD_LIMITS } from "./workflow/schema.js"
-import { WorkflowStore, type StoragePort } from "./state/store.js"
-import { RunLockManager } from "./state/concurrency.js"
-import { createInvocationRegistry, ReportIntake } from "./execution/report-intake.js"
+import type { StoragePort } from "./state/store.js"
 import { ReportTool } from "./adapters/opencode/report-tool.js"
 import { registerToolHooks } from "./adapters/opencode/tool-hooks.js"
-import { WorkflowRunner } from "./execution/runner.js"
 import { OpenCodeAdapter, type OpenCodePluginContext } from "./adapters/opencode/runtime.js"
 import { runServerCommand } from "./server-command.js"
-import { newInstanceID } from "./util/ids.js"
+import { createFlowgraphRuntime } from "./runtime/create.js"
 import { PLUGIN_NAME, PLUGIN_VERSION } from "./version.js"
 
 function storagePort(ctx: OpenCodePluginContext): StoragePort {
@@ -38,32 +33,27 @@ function numberOption(value: unknown, fallback: number): number {
 export default Plugin.define({
   id: "flowgraph",
   async setup(ctx) {
-    const instanceID = newInstanceID()
     const project = {
       id: ctx.location.project.id,
       canonical: ctx.location.project.canonical,
       directory: ctx.location.directory,
     }
-    const store = new WorkflowStore(storagePort(ctx))
     const harness = new OpenCodeAdapter(ctx)
-    const repo = new WorkflowRepository(ctx.location.project.directory)
-    const locks = new RunLockManager()
-    const invocations = createInvocationRegistry()
-    const intake = new ReportIntake(store, invocations)
     let emitRunUpdated: (payload: unknown) => Promise<void> = async () => undefined
 
-    const runner = new WorkflowRunner({
-      store,
+    const runtime = await createFlowgraphRuntime({
+      project,
       harness,
-      locks,
-      invocations,
-      instanceID,
+      storage: storagePort(ctx),
+      workflowDirectory: ctx.location.project.directory,
       emit: (payload) => emitRunUpdated(payload),
       options: {
         pollIntervalMs: numberOption(ctx.options.pollIntervalMs, 1_000),
         recoveryGraceMs: numberOption(ctx.options.recoveryGraceMs, 5_000),
       },
     })
+    const { service, intake, invocations } = runtime
+    if (runtime.repo.warning) console.warn(`flowgraph: ${runtime.repo.warning}`)
 
     const reportTool = new ReportTool(ctx, intake)
     await reportTool.register()
@@ -76,16 +66,6 @@ export default Plugin.define({
     await registerToolHooks(ctx, invocations, {
       allowBackgroundWork: ctx.options.allowBackgroundWork === true,
       protectedPaths,
-    })
-
-    const service = new WorkflowService({
-      project,
-      store,
-      runner,
-      harness,
-      repo,
-      instanceID,
-      emit: (payload) => emitRunUpdated(payload),
     })
 
     const capabilities: CapabilitiesOutput = {
@@ -138,16 +118,10 @@ export default Plugin.define({
       })
     })
 
-    const recoveryTimer = setTimeout(() => {
-      void service.recover().catch((error) => {
-        console.error("flowgraph: recovery failed", error instanceof Error ? error.message : "unknown error")
-      })
-    }, 250)
-    recoveryTimer.unref?.()
+    await runtime.start()
 
     return async () => {
-      clearTimeout(recoveryTimer)
-      await runner.shutdown()
+      await runtime.shutdown()
     }
   },
 })

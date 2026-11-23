@@ -59,7 +59,7 @@ export class NotResumableError extends Error {
 
 export class AmbiguousResumeError extends Error {
   constructor() {
-    super("the active node is ambiguous; resume requires confirmRetry=true")
+    super("the active node is ambiguous; resume requires explicit confirmation")
     this.name = "AmbiguousResumeError"
   }
 }
@@ -229,8 +229,8 @@ export class WorkflowRunner {
     })
   }
 
-  private launch(key: string, owner: OwnedRun, run: RunRecord, recovery: boolean): void {
-    owner.promise = this.runLoop(key, owner, run, recovery).catch(async (error: unknown) => {
+  private launch(key: string, owner: OwnedRun, run: RunRecord, recovery: boolean, chargeRecovery = true): void {
+    owner.promise = this.runLoop(key, owner, run, recovery, chargeRecovery).catch(async (error: unknown) => {
       if (owner.controller.signal.aborted) return
       await gate.run(key, async () => {
         const current = await this.requireRun(run.project.id, run.runID)
@@ -245,7 +245,7 @@ export class WorkflowRunner {
     }).finally(() => gate.run(key, () => this.release(key, owner)))
   }
 
-  private async runLoop(key: string, owner: OwnedRun, initial: RunRecord, recovery: boolean): Promise<void> {
+  private async runLoop(key: string, owner: OwnedRun, initial: RunRecord, recovery: boolean, chargeRecovery: boolean): Promise<void> {
     const { id: projectID } = initial.project
     const { runID } = initial
     const { signal } = owner.controller
@@ -266,13 +266,13 @@ export class WorkflowRunner {
           initialize(draft)
           if (instanceID) draft.owner = { instanceID, hostname: hostname(), pid: process.pid }
           projectCheckpoint(draft, this.now())
-          if (recovering.size > 0) {
+          if (recovering.size > 0 && chargeRecovery && run.status !== "pausing") {
             draft.recovery.attempts += 1
             draft.recovery.lastAttemptAt = this.now()
             draft.recovery.reason = "reconciling active nodes after restart"
           }
         })
-        if (run.recovery.attempts > run.workflowSnapshot.limits.max_recovery_attempts) {
+        if (chargeRecovery && run.recovery.attempts > run.workflowSnapshot.limits.max_recovery_attempts) {
           await this.fail(run, { code: "recovery_exhausted", message: "workflow exceeded its recovery attempt limit" })
           return
         }
@@ -319,6 +319,12 @@ export class WorkflowRunner {
             const node = definitionOf(run, branch.workflowID).nodes[branch.nodeID]
             if (node && "agent" in node) run = await this.admit(run, branch)
           }
+        } else if (!run.execution!.branches.some((branch) => branch.active)) {
+          // A run that paused while no branch was active is already drained;
+          // checkpoint the transition instead of parking it in "pausing".
+          run = await this.update(run, (draft) => {
+            projectCheckpoint(draft, this.now())
+          })
         }
         if (TERMINAL.has(run.status) || run.status === "paused") await this.release(key, owner)
         return run
@@ -561,7 +567,7 @@ export class WorkflowRunner {
         } }
       case "interrupted":
       case "cancelled":
-        return blocked("node_interrupted", `node "${nodeID}" was interrupted; resume with confirmRetry=true to retry it`)
+        return blocked("node_interrupted", `node "${nodeID}" was interrupted; resume with explicit confirmation to retry it`)
       default:
         return blocked("ambiguous_node", `node "${nodeID}" is idle without a terminal outcome`)
     }
@@ -757,13 +763,24 @@ export class WorkflowRunner {
   }
 
   async pause(projectID: string, runID: string, expectedRevision: number, requestID: string): Promise<RunRecord> {
-    return this.control(projectID, runID, expectedRevision, requestID, (runner, run) => runner.update(run, (draft) => {
-      draft.recentControlRequests[requestID] = { operation: "pause", at: runner.now(), revision: draft.revision + 1 }
-      if (TERMINAL.has(draft.status) || draft.status === "paused") return
-      initialize(draft)
-      draft.status = "pausing"
-      projectCheckpoint(draft, runner.now())
-    }))
+    return this.control(projectID, runID, expectedRevision, requestID, async (runner, run, key, owner) => {
+      const updated = await runner.update(run, (draft) => {
+        draft.recentControlRequests[requestID] = { operation: "pause", at: runner.now(), revision: draft.revision + 1 }
+        if (TERMINAL.has(draft.status) || draft.status === "paused") return
+        initialize(draft)
+        draft.status = "pausing"
+        projectCheckpoint(draft, runner.now())
+      })
+      // Without a live loop (for example, a run restored from disk after the
+      // previous process exited), nothing would drain admitted steps or turn
+      // pausing into paused. A pause drain is not restart reconciliation, so it
+      // must not consume max_recovery_attempts; an interrupted pause stays
+      // resumable through any number of retries.
+      if (updated.status === "pausing" && !owner.promise) {
+        runner.launch(key, owner, updated, activeSteps(updated).length > 0, false)
+      }
+      return updated
+    })
   }
 
   async resume(projectID: string, runID: string, expectedRevision: number, requestID: string, confirmRetry: boolean): Promise<RunRecord> {
@@ -786,7 +803,7 @@ export class WorkflowRunner {
       const human = execution.branches.filter((branch) => branch.blocker?.type === "human_input")
       const pendingWork = execution.branches.some((branch) => branch.active || branch.blocker?.type === "permission")
       if (human.length > 0 && !pendingWork && run.status !== "paused") {
-        throw new NotResumableError("the run is waiting for a human decision; use respondRun")
+        throw new NotResumableError("the run is waiting for a human decision; answer the human step instead")
       }
       const ambiguous = execution.branches.filter((branch) => branch.active &&
         (branch.active.phase === "ambiguous" || (branch.blocker && branch.blocker.type !== "permission")))

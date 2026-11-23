@@ -183,6 +183,26 @@ nodes:
     expect(final.status).toBe("completed")
   })
 
+  it("does not charge a pause drain against the recovery budget", async () => {
+    const { store, runner, newRunner } = setup(() => ({
+      delayMs: 60_000,
+      report: { outcome: "done", summary: "still running", feedback: "", evidence: [] },
+    }))
+    const run = await createRun(store)
+    await runner.start("prj_1", run.runID)
+    const active = await waitForRun(store, "prj_1", run.runID, (item) => item.activeStep !== null)
+    await runner.shutdown()
+
+    const next = newRunner()
+    expect((await next.pause("prj_1", run.runID, active.revision, "pause-drain")).status).toBe("pausing")
+    // The launch update is what used to increment recovery.attempts.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const draining = await store.getRun("prj_1", run.runID)
+    expect(draining?.recovery.attempts).toBe(0)
+    expect(draining?.status).not.toBe("failed")
+    await next.shutdown()
+  })
+
   it("waits for a human decision, routes on it, and hands feedback to the next agent", async () => {
     const workflow = `version: 1
 name: sample

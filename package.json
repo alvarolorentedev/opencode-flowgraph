@@ -1,7 +1,7 @@
 {
   "name": "@alvarolorentedev/opencode-flowgraph",
   "version": "1.0.1",
-  "description": "OpenCode V2 plugin for user-defined multi-agent YAML workflows with native agents, conditional routing, persistence, recovery, and generated Mermaid.",
+  "description": "Portable multi-agent YAML workflow engine with an OpenCode adapter, standalone CLI, persistence, recovery, and Mermaid.",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -11,7 +11,13 @@
     "./workflow": "./src/workflow/index.ts",
     "./server": "./src/index.ts",
     "./tui": "./src/tui.tsx",
-    "./gui-experimental": "./dist/gui-experimental.cjs"
+    "./gui-experimental": "./dist/gui-experimental.cjs",
+    "./core": "./dist/core.js",
+    "./runtime": "./dist/runtime.js",
+    "./storage": "./dist/storage.js"
+  },
+  "bin": {
+    "flowgraph": "./dist/cli.js"
   },
   "files": [
     "src",
@@ -25,13 +31,17 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "pretest": "bun run build:portable && bun run build:cli",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run test/integration",
     "check": "bun run typecheck && bun run test",
     "test:smoke": "vitest run test/integration/opencode-smoke.test.ts",
-    "prepublishOnly": "bun run check && bun run build:gui",
-    "build:gui": "vite build --config vite.gui.config.ts"
+    "build:portable": "bun build src/core.ts --outfile dist/core.js --target node --format esm --packages external && bun build src/runtime/index.ts --outfile dist/runtime.js --target node --format esm --packages external && bun build src/storage/index.ts --outfile dist/storage.js --target node --format esm --packages external",
+    "build:cli": "bun build src/cli.ts --outfile dist/cli.js --target node --format esm --packages external && chmod +x dist/cli.js",
+    "build:gui": "vite build --config vite.gui.config.ts",
+    "build": "bun run build:portable && bun run build:cli && bun run build:gui",
+    "prepublishOnly": "bun run check && bun run build"
   },
   "engines": {
     "bun": ">=1.2.0"
@@ -41,6 +51,12 @@
     "@opentui/core": ">=0.5.17",
     "@opentui/solid": ">=0.5.17",
     "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": { "optional": true },
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
   },
   "dependencies": {
     "proper-lockfile": "^4.1.2",

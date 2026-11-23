@@ -153,15 +153,17 @@ export function resolveAgents(
   return { resolutions, errors }
 }
 
-export function validateWorkflow(
+/**
+ * Structural validation without a harness: graph shape, limits, and routing
+ * only. Agent compatibility is deliberately not claimed.
+ */
+export function validateWorkflowStructure(
   workflow: WorkflowDefinition,
-  agents: readonly AgentDescriptor[],
-  options: { hasDefaultModel?: boolean; resultsSupported?: boolean } = {},
+  options: { resultsSupported?: boolean } = {},
 ): WorkflowValidation {
   const graph = buildGraph(workflow)
   const graphResult = validateGraph(workflow, graph)
-  const agentResult = resolveAgents(workflow, agents, options)
-  const errors = [...graphResult.errors, ...agentResult.errors]
+  const errors = [...graphResult.errors]
   const warnings = [...graphResult.warnings, ...graph.warnings]
 
   if (options.resultsSupported === false) {
@@ -181,6 +183,24 @@ export function validateWorkflow(
     graph,
     errors,
     warnings,
+    agents: [],
+  }
+}
+
+export function validateWorkflow(
+  workflow: WorkflowDefinition,
+  agents: readonly AgentDescriptor[],
+  options: { hasDefaultModel?: boolean; resultsSupported?: boolean } = {},
+): WorkflowValidation {
+  const structural = validateWorkflowStructure(workflow, options)
+  const agentResult = resolveAgents(workflow, agents, options)
+  const errors = [...structural.errors, ...agentResult.errors]
+  return {
+    valid: errors.length === 0,
+    workflow,
+    graph: structural.graph,
+    errors,
+    warnings: structural.warnings,
     agents: agentResult.resolutions,
   }
 }

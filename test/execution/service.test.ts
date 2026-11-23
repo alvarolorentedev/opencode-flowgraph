@@ -140,6 +140,22 @@ nodes:
     expect(final.steps.map((step) => step.nodeID)).toEqual(["signoff", "ship"])
   })
 
+  it("pauses a run whose previous process left an active step", async () => {
+    const { service, store, project, runner, newService } = await setup(() => ({
+      delayMs: 60_000,
+      report: { outcome: "done", summary: "still running", feedback: "", evidence: [] },
+    }))
+    await service.saveWorkflow("sample", source, null)
+    const started = await service.startRun("sample", "pause after restart", "pause-restart")
+    const active = await waitForRun(store, project.id, started.runID, (run) => run.activeStep !== null)
+    await runner.shutdown()
+
+    const { service: next } = newService()
+    await next.pauseRun(started.runID, "pause-after-restart", active.revision)
+    const paused = await waitForRun(store, project.id, started.runID, (run) => run.status === "paused")
+    expect(paused.pause?.reason).toBe("user")
+  })
+
   it("exposes foreign ownership and keeps foreign runs read-only", async () => {
     const { service, store, project } = await setup()
     const owned = await store.createRun(makeRunRecord({ project, runID: "run_0000000009_ownedd" }))

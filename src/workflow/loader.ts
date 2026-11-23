@@ -10,6 +10,7 @@ import {
   type WorkflowDefinition,
 } from "./schema.js"
 import type { Diagnostic } from "./graph.js"
+import { isInside, resolvePhysicalPath, resolveWorkflowRoot, type WorkflowRootSource } from "./root.js"
 
 export class WorkflowFileError extends Error {
   constructor(
@@ -268,30 +269,26 @@ export function parseWorkflowSource(
   return { workflow: parsed.data, errors: [], warnings }
 }
 
-function inside(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child)
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
-}
-
-async function realOrResolved(target: string): Promise<string> {
-  try {
-    return await fs.realpath(target)
-  } catch {
-    return path.resolve(target)
-  }
-}
-
 export class WorkflowRepository {
   readonly root: string
+  readonly source: WorkflowRootSource
+  readonly warning?: string
   private readonly projectDirectory: string
 
   constructor(projectDirectory: string, options: { root?: string } = {}) {
     this.projectDirectory = path.resolve(projectDirectory)
-    this.root = options.root === undefined
-      ? path.join(this.projectDirectory, ".opencode", "workflows")
-      : path.resolve(this.projectDirectory, options.root)
-    if (!inside(this.projectDirectory, this.root)) {
-      throw new WorkflowFileError("workflow directory resolves outside the project", "unsafe_path")
+    const resolved = resolveWorkflowRoot({
+      projectDirectory: this.projectDirectory,
+      ...(options.root === undefined ? {} : { workflowDir: options.root }),
+    })
+    this.root = resolved.root
+    this.source = resolved.source
+    this.warning = resolved.warning
+    if (!isInside(this.projectDirectory, this.root)) {
+      throw new WorkflowFileError(
+        `workflow directory resolves outside the project: ${this.root}`,
+        "unsafe_path",
+      )
     }
   }
 
@@ -307,17 +304,30 @@ export class WorkflowRepository {
     return workflowID
   }
 
-  private async ensureRoot(create: boolean): Promise<{ projectReal: string; rootReal: string }> {
+  private async resolveRoot(create: boolean): Promise<{ projectReal: string; rootReal: string; exists: boolean }> {
     const projectReal = await fs.realpath(this.projectDirectory).catch(() => this.projectDirectory)
-    if (create) await fs.mkdir(this.root, { recursive: true })
-    const rootReal = await fs.realpath(this.root).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") throw new WorkflowFileError("workflow not found", "not_found")
-      throw error
-    })
-    if (!inside(projectReal, rootReal)) {
-      throw new WorkflowFileError("workflow directory resolves outside the project", "unsafe_path")
+    // Resolve through the nearest existing ancestor before creating anything, so
+    // a symlinked parent cannot redirect the workflow root outside the project.
+    const physical = await resolvePhysicalPath(this.root)
+    if (!isInside(projectReal, physical)) {
+      throw new WorkflowFileError(`workflow directory resolves outside the project: ${physical}`, "unsafe_path")
     }
-    return { projectReal, rootReal }
+    if (create) {
+      await fs.mkdir(physical, { recursive: true, mode: 0o700 })
+      return { projectReal, rootReal: await fs.realpath(physical), exists: true }
+    }
+    try {
+      return { projectReal, rootReal: await fs.realpath(physical), exists: true }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+      return { projectReal, rootReal: physical, exists: false }
+    }
+  }
+
+  private async ensureRoot(create: boolean): Promise<{ projectReal: string; rootReal: string }> {
+    const resolved = await this.resolveRoot(create)
+    if (!resolved.exists) throw new WorkflowFileError("workflow not found", "not_found")
+    return { projectReal: resolved.projectReal, rootReal: resolved.rootReal }
   }
 
   private async safeExistingPath(workflowID: string): Promise<{ file: string; rootReal: string; projectReal: string }> {
@@ -340,20 +350,16 @@ export class WorkflowRepository {
       throw new WorkflowFileError("workflow path is not a regular file", "unsafe_path")
     }
     const real = await fs.realpath(file)
-    if (!inside(rootReal, real)) {
+    if (!isInside(rootReal, real)) {
       throw new WorkflowFileError("workflow path resolves outside the workflow directory", "unsafe_path")
     }
     return { file, rootReal, projectReal }
   }
 
   async listIDs(): Promise<string[]> {
-    let entries
-    try {
-      entries = await fs.readdir(this.root, { withFileTypes: true })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
-      throw error
-    }
+    const { rootReal, exists } = await this.resolveRoot(false)
+    if (!exists) return []
+    const entries = await fs.readdir(rootReal, { withFileTypes: true })
     const ids: string[] = []
     for (const entry of entries) {
       if (!entry.isFile()) continue
@@ -456,7 +462,7 @@ export class WorkflowRepository {
         throw new WorkflowFileError("workflow path is not a regular file", "unsafe_path")
       }
       const real = await fs.realpath(file)
-      if (!inside(rootReal, real)) {
+      if (!isInside(rootReal, real)) {
         throw new WorkflowFileError("workflow path resolves outside the workflow directory", "unsafe_path")
       }
     } catch (error) {

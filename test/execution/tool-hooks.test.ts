@@ -49,6 +49,12 @@ describe("workflow tool hooks", () => {
       /protected configuration path "\.opencode"/,
     )
     expect(() => hook(event("write", { path: "opencode.json", content: "{}" }))).toThrow(/protected configuration path/)
+    expect(() => hook(event("write", { path: ".flowgraph/workflows/development.yaml", content: "" }))).toThrow(
+      /protected configuration path "\.flowgraph"/,
+    )
+    expect(() => hook(event("write", { path: ".flowgraph/state/record.json", content: "" }))).toThrow(
+      /protected configuration path "\.flowgraph"/,
+    )
   })
 
   it("blocks every known file tool on an add, update, delete, or move", async () => {
@@ -85,6 +91,7 @@ describe("workflow tool hooks", () => {
     const hook = await setup()
     for (const command of [
       "rm -rf .opencode",
+      "rm -rf .flowgraph",
       "rmdir .opencode",
       "mv build .opencode/agents",
       "cp secret opencode.json",

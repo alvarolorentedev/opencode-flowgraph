@@ -7,7 +7,7 @@ import { runSuffix, harnessId } from "./ui/harness.js"
 // Headless rendering of /flowgraph for API-driven clients (mobile, web).
 // TUI/GUI navigate and open dialogs; the server command can only reply with text.
 
-function objectiveLabel(objective: string): string {
+export function objectiveLabel(objective: string): string {
   const line = objective.replace(/\s+/gu, " ").trim()
   return line.length > 64 ? `${line.slice(0, 61)}…` : line
 }

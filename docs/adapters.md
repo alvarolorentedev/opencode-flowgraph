@@ -66,6 +66,85 @@ Adapters must be safe for concurrent calls on different sessions. The engine obs
 
 `SessionRef` and `SubmissionRef` are persisted in `RunRecord`/`StepRecord` fields with a 128-character limit. If a native identifier is longer, map it to a stable bounded key and keep the native value in adapter-local storage.
 
+## Portable runtime
+
+Adapters do not construct the engine directly. A host calls
+`createFlowgraphRuntime` and supplies either an adapter instance or a provider:
+
+```ts
+const runtime = await createFlowgraphRuntime({
+  project: { id, canonical, directory },
+  storage,
+  harness: myAdapter,
+  emit: (event) => hostEventBridge(event),
+})
+await runtime.start()
+```
+
+A provider receives the portable components an adapter legitimately needs:
+
+```ts
+const runtime = await createFlowgraphRuntime({
+  project,
+  storage,
+  harness: async ({ project, workflowRoot, store, intake, invocations }) => {
+    return createMyAdapter({ project, workflowRoot, store, intake, invocations })
+  },
+})
+```
+
+`intake` is the canonical way to transport a native structured result. The
+adapter must not write `ReportRecord`s directly. The runtime factory does not
+import any harness-specific module.
+
+## Standalone CLI adapter provider
+
+The CLI and future native plugins use the same entry point. A trusted local
+module must export:
+
+```ts
+export async function createHarnessAdapter(context: {
+  project: ProjectIdentity
+  workflowRoot: string
+  store: WorkflowStore
+  intake: ReportIntake
+  invocations: InvocationRegistry
+}): Promise<HarnessAdapter>
+```
+
+Usage:
+
+```bash
+flowgraph run development "implement it" --adapter-module ./my-adapter.mjs
+```
+
+Rules:
+
+- Only an explicit local file path is loaded. Remote URLs and non-files are rejected.
+- Adapter modules execute trusted code in the CLI process. Review them before use.
+- The runtime validates `HarnessCapabilitiesSchema` and requires
+  `listAgents`, `resolveAgent`, `createSession`, `submit`, `inspect`,
+  `pendingPermissions`, and `cancel`.
+- Without `--adapter-module`, inspection commands still work and execution
+  commands exit with code `3` and a clear message. No fake adapter is shipped.
+- A missing or invalid adapter is never reported as workflow validity. The CLI
+  distinguishes structural validity from agent resolution.
+- CLI state holds only runs started by the CLI. A run owned by another harness
+  is not visible, so `pause`, `resume`, `cancel`, and `respond` report it as not
+  found in CLI state; the CLI cannot control it.
+
+`submit` must still resolve after admission proof. `inspect` must remain
+side-effect free. Foreground `run` polls the engine and never re-submits an
+uncertain prompt. `pause` drains through the same engine, including a run
+restored after the previous CLI process exited; it refuses while any branch has a
+native permission or human decision outstanding. A permission discovered during
+the drain stops the wait with exit `1`, leaves the run `pausing`, and prints the
+resume command. A persisted active session that
+`inspect` reports as `interrupted` or `cancelled` becomes a
+`node_interrupted` blocker, then the drained run becomes `paused`. A pause drain
+never consumes `max_recovery_attempts`; interrupted or retried pauses remain
+resumable.
+
 ## Capabilities
 
 `HarnessCapabilities` must be honest:
@@ -271,3 +350,18 @@ Before implementing a full ACP adapter:
 | Cost reporting | yes | no | yes | optional |
 
 This table is a design aid, not a support claim. Only OpenCode is implemented and supported.
+
+## Next native integration
+
+A Codex adapter will not change the workflow schema, scheduler, persistence
+abstractions, or CLI. It supplies a `HarnessAdapter` over the Codex app-server
+(agent discovery, sessions, `outputSchema` structured results, cancel, and
+permission reporting), then either:
+
+- wraps it in an OpenCode-like plugin that creates the runtime itself, or
+- publishes a trusted local CLI adapter module exporting
+  `createHarnessAdapter(context)`.
+
+The adapter must report `sessions.adoptLegacyRuns: false` and map its native
+session IDs into the `SessionRef` fields. Until that adapter exists, Codex and
+Claude Code are not supported.

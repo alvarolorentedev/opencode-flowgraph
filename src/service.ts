@@ -2,7 +2,7 @@ import { hostname } from "node:os"
 import { HARD_LIMITS } from "./workflow/schema.js"
 import type { WorkflowDefinition } from "./workflow/schema.js"
 import { WorkflowFileError, WorkflowRepository, parseWorkflowSource } from "./workflow/loader.js"
-import { validateWorkflow, type AgentResolution, type WorkflowValidation } from "./workflow/validator.js"
+import { validateWorkflow, validateWorkflowStructure, type AgentResolution, type WorkflowValidation } from "./workflow/validator.js"
 import { renderMermaid } from "./workflow/mermaid.js"
 import { buildRunGraph } from "./execution/run-graph.js"
 import { buildGraph, type Diagnostic, type WorkflowGraph } from "./workflow/graph.js"
@@ -121,6 +121,80 @@ export type ServiceDeps = {
 
 const admission = new KeyedMutex()
 
+/**
+ * Walk referenced workflows once, adding recursion, size, parse, and child
+ * validation diagnostics to `root`. `validateChild` decides whether agent
+ * resolution is part of the check; structural-only callers pass a validator
+ * that leaves `agents` empty.
+ */
+async function collectWorkflowDependencies(
+  repo: WorkflowRepository,
+  workflow: WorkflowDefinition,
+  root: WorkflowValidation,
+  initialBytes: number,
+  validateChild: (child: WorkflowDefinition) => WorkflowValidation,
+): Promise<NonNullable<RunRecord["workflowDependencies"]>> {
+  const dependencies: NonNullable<RunRecord["workflowDependencies"]> = {}
+  let bytes = initialBytes
+  const stack = new Set([workflow.name])
+  const visited = new Set<string>()
+
+  const visit = async (definition: WorkflowDefinition): Promise<void> => {
+    for (const [id, node] of Object.entries(definition.nodes)) {
+      if (!("workflow" in node)) continue
+      const path = `workflows.${definition.name}.nodes.${id}.workflow`
+      const name = node.workflow
+      if (stack.has(name)) {
+        root.errors.push({ path, message: `recursive workflow call to "${name}"`, code: "recursive_workflow" })
+        continue
+      }
+      if (visited.has(name)) continue
+      visited.add(name)
+      try {
+        const file = await repo.read(name)
+        bytes += file.size
+        if (bytes > HARD_LIMITS.maxWorkflowBytes || visited.size >= HARD_LIMITS.maxWorkflows) {
+          root.errors.push({ path, message: "combined workflow sources exceed the workflow size or count limit", code: "workflow_dependency_limit" })
+          return
+        }
+        if (!file.workflow) {
+          root.errors.push(...file.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
+          continue
+        }
+        const child = validateChild(file.workflow)
+        root.errors.push(...child.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
+        root.warnings.push(...[...file.warnings, ...child.warnings].map((warning) => `${name}: ${warning}`))
+        for (const agent of child.agents) {
+          if (!root.agents.some((existing) => existing.agentID === agent.agentID)) root.agents.push(agent)
+        }
+        dependencies[name] = { definition: file.workflow, hash: file.hash }
+        stack.add(name)
+        await visit(file.workflow)
+        stack.delete(name)
+      } catch (error) {
+        root.errors.push({ path, message: errorMessage(error), code: "invalid_workflow_reference" })
+      }
+    }
+  }
+  await visit(workflow)
+  return dependencies
+}
+
+/**
+ * Structural validation without a harness, including referenced workflows.
+ * Agent compatibility is deliberately not claimed.
+ */
+export async function validateWorkflowTree(
+  repo: WorkflowRepository,
+  workflow: WorkflowDefinition,
+  bytes: number,
+  options: { resultsSupported?: boolean } = {},
+): Promise<WorkflowValidation> {
+  const root = validateWorkflowStructure(workflow, options)
+  await collectWorkflowDependencies(repo, workflow, root, bytes, (child) => validateWorkflowStructure(child, options))
+  return { ...root, valid: root.errors.length === 0 }
+}
+
 export class WorkflowService {
   readonly project: ProjectIdentity
   private readonly store: WorkflowStore
@@ -151,48 +225,13 @@ export class WorkflowService {
   ): Promise<WorkflowValidation & { dependencies: NonNullable<RunRecord["workflowDependencies"]> }> {
     const options = { resultsSupported: this.harness.capabilities.results.mechanism !== "none" }
     const root = validateWorkflow(workflow, context.agents, options)
-    const dependencies: NonNullable<RunRecord["workflowDependencies"]> = {}
-    const stack = new Set([workflow.name])
-    const visited = new Set<string>()
-
-    const visit = async (definition: WorkflowDefinition): Promise<void> => {
-      for (const [id, node] of Object.entries(definition.nodes)) {
-        if (!("workflow" in node)) continue
-        const path = `workflows.${definition.name}.nodes.${id}.workflow`
-        const name = node.workflow
-        if (stack.has(name)) {
-          root.errors.push({ path, message: `recursive workflow call to "${name}"`, code: "recursive_workflow" })
-          continue
-        }
-        if (visited.has(name)) continue
-        visited.add(name)
-        try {
-          const file = await this.repo.read(name)
-          bytes += file.size
-          if (bytes > HARD_LIMITS.maxWorkflowBytes || visited.size >= HARD_LIMITS.maxWorkflows) {
-            root.errors.push({ path, message: "combined workflow sources exceed the workflow size or count limit", code: "workflow_dependency_limit" })
-            return
-          }
-          if (!file.workflow) {
-            root.errors.push(...file.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
-            continue
-          }
-          const child = validateWorkflow(file.workflow, context.agents, options)
-          root.errors.push(...child.errors.map((error) => ({ ...error, path: `workflows.${name}.${error.path}` })))
-          root.warnings.push(...[...file.warnings, ...child.warnings].map((warning) => `${name}: ${warning}`))
-          for (const agent of child.agents) {
-            if (!root.agents.some((existing) => existing.agentID === agent.agentID)) root.agents.push(agent)
-          }
-          dependencies[name] = { definition: file.workflow, hash: file.hash }
-          stack.add(name)
-          await visit(file.workflow)
-          stack.delete(name)
-        } catch (error) {
-          root.errors.push({ path, message: errorMessage(error), code: "invalid_workflow_reference" })
-        }
-      }
-    }
-    await visit(workflow)
+    const dependencies = await collectWorkflowDependencies(
+      this.repo,
+      workflow,
+      root,
+      bytes,
+      (child) => validateWorkflow(child, context.agents, options),
+    )
     return { ...root, valid: root.errors.length === 0, dependencies }
   }
 

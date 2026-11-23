@@ -60,11 +60,11 @@ describe("WorkflowRepository", () => {
 
   it("rejects invalid IDs and symlinked workflow files", async () => {
     const project = await tempProject()
+    const root = path.join(project, ".opencode", "workflows")
+    await fs.mkdir(root, { recursive: true })
     const repo = new WorkflowRepository(project)
     await expect(repo.read("../escape")).rejects.toMatchObject({ code: "invalid_workflow_id" })
 
-    const root = path.join(project, ".opencode", "workflows")
-    await fs.mkdir(root, { recursive: true })
     const outside = path.join(project, "outside.yaml")
     await fs.writeFile(outside, valid)
     await fs.symlink(outside, path.join(root, "sample.yaml"))

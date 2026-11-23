@@ -13,6 +13,7 @@ old keys.
 | M0 — Verify OpenCode | Automated lifecycle/restart tests are implemented and pass against real OpenCode binaries (`v2.2.5` and `v2.3.2`). The manual real-model E2E record is **pending**. |
 | M1 — Contract suite, transports, recovery parity | **Implemented and tested.** `describeHarnessContract` runs every documented scenario on two capability variants, a deliberate capability lie fails, `NodeResultJsonSchema` is generated from `NodeResultSchema`, synthesized report refs are canonical, and the recovery matrix matches the tests. |
 | M2 — Capability exposure and harness-aware views | **Implemented and tested at the RPC/service/presentation level.** `harnessCapabilities`, foreign-run identity, ownership-aware controls, read-only TUI/GUI/server rendering, Desktop read-only foreign and legacy graph navigation, and fixtures are covered by tests. The manual TUI/GUI check remains pending (the verification environment has no interactive TUI/Desktop session) and real foreign-harness visuals stay fixture-only until an M4 adapter exists. |
+| Portable runtime + standalone CLI | **Implemented and tested.** `createFlowgraphRuntime`, `FileSystemStoragePort`, shared workflow-root resolution, portable package exports, and the `flowgraph` CLI are covered by unit tests and architecture checks. Execution from the CLI still requires an explicitly supplied trusted adapter module; no second execution adapter ships. |
 | M3/M4/M5 | **Not implemented.** Future milestones; no second adapter exists. |
 
 "Implemented and tested" means the default `bun run check` suite exercises the
@@ -30,8 +31,9 @@ The harness-agnostic refactor is in place:
   native `flowgraph_report` tool.
 - Run ownership is stored beside the run at
   `v1/run-harness/<projectID>/<runID>`; `RunRecord` is unchanged.
-- `src/index.ts` is the only composition root; it wires the core to the OpenCode
-  plugin.
+- `src/runtime/create.ts` is the portable composition root; `src/index.ts` is a thin OpenCode layer over it.
+- `src/storage/filesystem.ts` supplies the CLI storage port under `.flowgraph/state`.
+- `src/cli.ts` and the `flowgraph` bin use the same service and engine.
 - Controls reject a foreign harness, and a missing sidecar is adopted only by an
   adapter with `sessions.adoptLegacyRuns`.
 

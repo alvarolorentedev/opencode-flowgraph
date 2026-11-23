@@ -9,6 +9,7 @@ export type ToolHookOptions = {
 
 const DEFAULT_PROTECTED_PATHS = [
   ".opencode",
+  ".flowgraph",
   "opencode.json",
   "opencode.jsonc",
   "AGENTS.md",

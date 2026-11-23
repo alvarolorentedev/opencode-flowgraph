@@ -1,6 +1,6 @@
 # Interfaces
 
-The plugin exposes the same run model through four surfaces: RPC, the server `/flowgraph` command, the TUI, and the experimental Desktop GUI.
+The plugin exposes the same run model through four OpenCode surfaces: RPC, the server `/flowgraph` command, the TUI, and the experimental Desktop GUI. The portable engine also has a standalone CLI surface.
 
 ## RPC
 
@@ -156,6 +156,56 @@ A foreign-harness run is marked with ` · [<id>]` in `runs` output. A run
 without a harness identity is marked ` · [read-only]`. `graph` adds
 `Harness: <id> (read-only via RPC)` (or `Run is read-only via RPC (no harness
 identity).`) and omits the `respondRun` hint. OpenCode output is unchanged.
+
+## Standalone CLI
+
+The `flowgraph` executable uses the portable service; it does not load the OpenCode plugin or RPC surface.
+
+```text
+flowgraph [--project <dir>] [--workflow-dir <dir>] [--state-dir <dir>] <command>
+flowgraph list
+flowgraph validate <workflow-id>
+flowgraph show <workflow-id>
+flowgraph run <workflow-id> "<objective>" --adapter-module <path>
+flowgraph runs
+flowgraph graph <run-id>
+flowgraph pause <run-id> --adapter-module <path>
+flowgraph resume <run-id> --adapter-module <path> [--confirm-retry]
+flowgraph cancel <run-id> --adapter-module <path>
+flowgraph respond <run-id> --outcome <outcome> [--node <id>] [--feedback <text>] --adapter-module <path>
+```
+
+- Inspection commands work without an adapter. `list` says
+  `structurally valid; agents unchecked`; `validate` says
+  `Structurally valid; agent compatibility not checked (no execution adapter).`
+  and exits `0`. It never claims agent compatibility it has not checked.
+- Execution and control commands without an adapter exit `3` with
+  `No execution adapter configured: ... --adapter-module <path> ...`.
+- `run`, `resume`, and `respond` execute in the foreground. `run` prints the run
+  ID immediately, then waits for completed, blocked, cancelled, or failed.
+  A blocked run exits `0` and prints the next command for its blocker: `respond`
+  for a human step, `resume` after a native permission, or `resume
+  --confirm-retry` for an interrupted or ambiguous node. A failure exits `1` and
+  prints validation diagnostics when the workflow is invalid.
+- `pause` drains active nodes and refuses while any branch has a permission or
+  human decision outstanding. It starts the drain for a run restored after a
+  process exit. If a native permission appears only after the drain starts, the
+  wait stops with exit `1`; the run stays `pausing`, and the resume command is
+  printed. A drain never consumes `max_recovery_attempts`, so an interrupted
+  pause stays resumable.
+  SIGINT/SIGTERM stop the runtime gracefully and exit `130`/`143`; an interrupt
+  before the run or action starts says so instead of claiming a checkpoint.
+- `--json` prints one JSON document; `run` emits NDJSON
+  `started`/`status`/`result` events. Errors use
+  `{"error":{"code","message","diagnostics?"}}` on stdout with the same exit code.
+- Output never includes native session references, prompts, tool inputs, or raw
+  storage. `show` prints only the workflow YAML.
+- CLI state is `.flowgraph/state`; add it to `.gitignore` because it holds
+  objectives plus native session references. OpenCode runs are not visible to
+  `runs`/`graph`.
+
+The adapter module contract, trusted-code rules, and capability validation are in
+[`adapters.md`](adapters.md#standalone-cli-adapter-provider).
 
 ## TUI
 

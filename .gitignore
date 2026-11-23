@@ -1,5 +1,6 @@
 node_modules/
 dist/
 coverage/
+.flowgraph/state/
 *.log
 .DS_Store

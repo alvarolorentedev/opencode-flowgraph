@@ -31,7 +31,7 @@ Review the change. Report findings in severity order.
 
 ## Workflow files
 
-Workflows live in `.opencode/workflows/*.yaml`. The file stem must match `name`: `development.yaml` → `name: development`.
+Workflows live in `.flowgraph/workflows/*.yaml`. The file stem must match `name`: `development.yaml` → `name: development`. Existing `.opencode/workflows/*.yaml` files keep working when the neutral directory is absent; if both exist, `.flowgraph/workflows` wins and the legacy directory is ignored, not merged.
 
 ```yaml
 version: 1
