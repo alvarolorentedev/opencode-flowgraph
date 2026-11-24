@@ -5,7 +5,7 @@ description: Product scope, UX contract, build, validation with adherence, revie
 entry: po
 
 limits:
-  max_steps: 14
+  max_steps: 32
   timeout_seconds: 10800
   node_timeout_seconds: 3600
 
